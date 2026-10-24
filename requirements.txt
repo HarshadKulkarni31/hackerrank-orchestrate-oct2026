@@ -1,0 +1,4 @@
+# HackerRank Orchestrate (October 2026) - Ghost Data Still Exists
+# Core pipeline runs entirely on Python 3.10+ standard libraries (zero third-party dependencies required).
+# Optional development and testing dependencies:
+pytest>=7.0.0
