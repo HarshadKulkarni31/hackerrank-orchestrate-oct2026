@@ -1,0 +1,69 @@
+"""Configuration module for Ghost Data Still Exists deletion audit agent."""
+
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+CODE_DIR = REPO_ROOT / "code"
+DATASET_DIR = REPO_ROOT / "dataset"
+EVIDENCE_DIR = DATASET_DIR / "evidence"
+
+DELETION_REQUESTS_PATH = DATASET_DIR / "deletion_requests.csv"
+SAMPLE_DELETION_REQUESTS_PATH = DATASET_DIR / "sample_deletion_requests.csv"
+SAMPLE_OUTPUT_PATH = DATASET_DIR / "sample_output.csv"
+USER_IDENTITIES_PATH = DATASET_DIR / "user_identities.csv"
+USER_AUDIT_LOG_PATH = DATASET_DIR / "user_audit_log.csv"
+SYSTEM_ACTIVITY_PATH = DATASET_DIR / "system_activity.csv"
+DELETION_RULES_PATH = DATASET_DIR / "deletion_rules.csv"
+EVIDENCE_FILES_PATH = DATASET_DIR / "evidence_files.csv"
+ROOT_OUTPUT_PATH = REPO_ROOT / "output.csv"
+
+EVALUATION_DIR = CODE_DIR / "evaluation"
+EVALUATION_REPORT_PATH = EVALUATION_DIR / "evaluation_report.md"
+USAGE_REPORT_PATH = EVALUATION_DIR / "usage_report.md"
+
+# Canonical operations and phases allowed by problem_statement.md
+ALLOWED_PHASES = ["FINDING", "REMEDIATION", "VERIFICATION"]
+
+ALLOWED_OPERATIONS_BY_PHASE = {
+    "FINDING": [
+        "REPORT_REMAINING_RECORD",
+        "REPORT_EXPOSED_PII",
+        "REPORT_ACTIVE_DATA_FLOW",
+        "REPORT_RESTORE_RISK",
+    ],
+    "REMEDIATION": [
+        "DISABLE_DATA_FLOW",
+        "BLOCK_RESTORE",
+        "DELETE_RECORD",
+        "REDACT_RECORD",
+        "ANONYMIZE_RECORD",
+    ],
+    "VERIFICATION": [
+        "VERIFY_RECORD_ABSENT",
+        "VERIFY_RECORD_PRESENT",
+        "VERIFY_RECORD_REDACTED",
+        "VERIFY_RECORD_ANONYMIZED",
+        "VERIFY_DATA_FLOW_DISABLED",
+        "VERIFY_RESTORE_BLOCKED",
+    ],
+}
+
+VALID_OPERATION_STATES = {
+    "REPORT_REMAINING_RECORD": "PRESENT",
+    "REPORT_EXPOSED_PII": "PRESENT",
+    "REPORT_ACTIVE_DATA_FLOW": "ACTIVE",
+    "REPORT_RESTORE_RISK": "ACTIVE",
+    "DISABLE_DATA_FLOW": "DISABLED",
+    "BLOCK_RESTORE": "BLOCKED",
+    "DELETE_RECORD": "ABSENT",
+    "REDACT_RECORD": "REDACTED",
+    "ANONYMIZE_RECORD": "ANONYMIZED",
+    "VERIFY_RECORD_ABSENT": "ABSENT",
+    "VERIFY_RECORD_PRESENT": "PRESENT",
+    "VERIFY_RECORD_REDACTED": "REDACTED",
+    "VERIFY_RECORD_ANONYMIZED": "ANONYMIZED",
+    "VERIFY_DATA_FLOW_DISABLED": "DISABLED",
+    "VERIFY_RESTORE_BLOCKED": "BLOCKED",
+}
+
+STATUS_CHOICES = ["COMPLETE", "INCOMPLETE", "NOT_APPLICABLE"]
