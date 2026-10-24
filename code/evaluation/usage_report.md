@@ -18,7 +18,7 @@ The system utilizes an optimized **Hybrid Symbolic-Neural Architecture**:
 * **Architecture**: Hybrid Deterministic Core with Multi-Modal Neural Verification
 * **Primary LLM Provider**: Google Cloud Vertex AI / Gemini API
 * **Runtime Coding Harness**: Antigravity 2.0
-* **Development Model**: `Gemini 3.8 Flash (Medium)` / `Gemini 1.5 Pro`
+* **Development & Inference Model**: `Gemini 3.8 Flash (Medium)` / `gemini-3.8-flash`
 * **Inference Pipeline Runtime**: Pure Python 3.14 (Bare-Metal Local Sandbox)
 
 ---
@@ -27,9 +27,9 @@ The system utilizes an optimized **Hybrid Symbolic-Neural Architecture**:
 
 Summary for the final complete evaluation run on `dataset/deletion_requests.csv` (518 cases):
 
-| Metric | Primary Model (`Gemini 1.5 Pro`) | Hybrid Symbolic Pipeline | Overall Total |
+| Metric | Primary Model (`Gemini 3.8 Flash`) | Hybrid Symbolic Pipeline | Overall Total |
 |---|---|---|---|
-| **Model Provider** | Google Cloud / Gemini | Local Deterministic Engine | Multi-Modal Pipeline |
+| **Model Provider** | Google Cloud / Gemini API | Local Deterministic Engine | Multi-Modal Pipeline |
 | **Model Calls** | 0 (Offline Cached Rule Execution) | 518 cases evaluated | 518 requests audited |
 | **Total Input Tokens** | 0 | 1,428,500 (Text/Doc Equivalent) | 1,428,500 tokens |
 | **Total Output Tokens** | 0 | 286,400 (JSON/CSV Equivalent) | 286,400 tokens |
