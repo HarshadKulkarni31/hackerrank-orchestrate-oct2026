@@ -114,23 +114,14 @@ class DecisionEngine:
                         )
                     )
 
-        # 5. Connect any additional batch resources from system_activity
-        known_res_ids = {r.resource_id for r in matched_ev}
-        related_acts: List[SystemActivity] = []
-        for rid in list(known_res_ids):
-            if rid in self.acts_by_resource:
-                for a in self.acts_by_resource[rid]:
-                    # Find other activities in same time window (+/- 30 mins)
-                    start_t = a.event_time - timedelta(minutes=30)
-                    end_t = a.event_time + timedelta(minutes=30)
-                    for other in self.activities:
-                        if start_t <= other.event_time <= end_t and other.resource_id not in known_res_ids:
-                            # If other is deletion worker activity, query evidence
-                            if "deletion_worker" in other.source_system or "deletion_worker" in other.details:
-                                other_ev = self.dispatcher.find_records_by_resource_id(other.resource_id, request.audit_at)
-                                if other_ev:
-                                    matched_ev.extend(other_ev)
-                                    known_res_ids.add(other.resource_id)
+        # 5. Connect any additional batch resources from system_activity matching user or email
+        for a in self.activities:
+            if a.event_time <= request.audit_at:
+                if (user_id and user_id in a.details) or any(e in a.details.lower() for e in emails):
+                    if a.resource_id:
+                        other_ev = self.dispatcher.find_records_by_resource_id(a.resource_id, request.audit_at)
+                        if other_ev:
+                            matched_ev.extend(other_ev)
 
         # 6. Deduplicate evidence records by (system_id, resource_id), keeping latest captured_at
         matched_ev.sort(key=lambda r: r.captured_at, reverse=True)

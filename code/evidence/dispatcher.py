@@ -220,7 +220,7 @@ class EvidenceDispatcher:
 
             # 3. single-service exports
             elif "customer_export_jobs" in str(path):
-                jobs = data if isinstance(data, list) else data.get("jobs", [])
+                jobs = data if isinstance(data, list) else (data.get("records", []) or data.get("jobs", []))
                 for job in jobs:
                     u = job.get("customer_reference")
                     em = job.get("email") or job.get("owner_email")
@@ -381,13 +381,39 @@ class EvidenceDispatcher:
 
             # Re-process lines with resolved trace identities
             for tokens in lines:
-                sys_id = tokens.get("service")
+                raw_sys_id = tokens.get("service")
                 rid = tokens.get("resource_id", "").strip('"')
                 tid = tokens.get("trace_id", "").strip('"')
-                if not sys_id or not rid or rid == "null":
+                if not raw_sys_id or not rid or rid == "null":
                     continue
 
+                # Normalize service name
+                sys_id = raw_sys_id
+                if "account" in raw_sys_id:
+                    sys_id = "account_service"
+                elif "support" in raw_sys_id:
+                    sys_id = "support_platform"
+                elif "search" in raw_sys_id:
+                    sys_id = "search_service"
+                elif "analytics" in raw_sys_id:
+                    sys_id = "analytics_platform"
+                elif "integration" in raw_sys_id or "connector" in raw_sys_id:
+                    sys_id = "integration_service"
+                elif "backup" in raw_sys_id:
+                    sys_id = "backup_service"
+                elif "security" in raw_sys_id:
+                    sys_id = "security_service"
+
                 u, em = trace_identities.get(tid, (None, None))
+                # Also check inline tokens for email / user if not found in trace
+                if not em:
+                    inline_em = tokens.get("lookup_key", "").strip('"') or tokens.get("match_key", "").strip('"') or tokens.get("email", "").strip('"')
+                    if inline_em and "@" in inline_em:
+                        em = inline_em
+                if not u:
+                    inline_u = tokens.get("subject_ref", "").strip('"') or tokens.get("customer_reference", "").strip('"') or tokens.get("subject_reference", "").strip('"')
+                    if inline_u and inline_u.startswith("user_"):
+                        u = inline_u
 
                 if sys_id == "account_service":
                     st = "ABSENT" if tokens.get("http_status") == "404" or tokens.get("rows") == "0" else "PRESENT"
@@ -412,8 +438,13 @@ class EvidenceDispatcher:
                         )
                     )
                 elif sys_id == "support_platform":
-                    has_pii = bool(tokens.get("requester_email") not in ("null", None) or em)
-                    st = "PRESENT" if has_pii else "REDACTED"
+                    marker_found = tokens.get("marker_found")
+                    if marker_found == "false":
+                        st = "PRESENT"
+                        has_pii = False
+                    else:
+                        has_pii = bool(tokens.get("requester_email") not in ("null", None) or em)
+                        st = "PRESENT" if has_pii else "REDACTED"
                     self._add_record(
                         EvidenceRecord(
                             file_id, captured_at, sys_id, rid, "SUPPORT_MESSAGE", u, em, st, has_pii
