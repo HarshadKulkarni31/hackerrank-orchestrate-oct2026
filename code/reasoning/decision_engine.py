@@ -140,11 +140,13 @@ class DecisionEngine:
             cand_resources.add(self.user_to_audit_rec[user_id])
 
         # 6. Connect Activities Mentioning Subject Directly
+        activity_evidence_map: Dict[str, str] = {}
         for a in self.activities:
             if a.event_time <= request.audit_at:
                 if (user_id and user_id in a.details) or any(e in a.details.lower() for e in emails):
                     if a.resource_id and not a.resource_id.startswith("email_delivery_"):
                         cand_resources.add(a.resource_id)
+                        activity_evidence_map[a.resource_id] = a.activity_id
 
         # 7. Apply Policy Assessments
         assessments: List[RecordAssessment] = []
@@ -203,18 +205,32 @@ class DecisionEngine:
                     rep_ev = self.dispatcher.find_records_by_resource_id(rid, request.audit_at)
                     ev_ref = rep_ev[0].evidence_id if rep_ev else "evidence_54"
                     ass = self.policy.assess_record(sys_id, rid, cat, "ABSENT", ev_ref, False)
+                    assessments.append(ass)
                 elif sys_id == "security_service":
                     ev_ref = r_evs[0].evidence_id if r_evs else ""
                     if not ev_ref:
                         continue
                     ass = self.policy.assess_record(sys_id, rid, cat, "PRESENT", ev_ref, False)
+                    assessments.append(ass)
                 else:
-                    ass = self.policy.assess_record(sys_id, rid, cat, "PRESENT", "", True)
-                assessments.append(ass)
+                    ev_ref = activity_evidence_map.get(rid, "")
+                    if not ev_ref:
+                        continue
+                    ass = self.policy.assess_record(sys_id, rid, cat, "PRESENT", ev_ref, True)
+                    assessments.append(ass)
 
         # 8. Determine Case Status and Build Canonical Steps
         has_violations = any(a.is_violation for a in assessments)
         status = STATUS_INCOMPLETE if has_violations else STATUS_COMPLETE
+
+        # If COMPLETE, ensure every step is backed by evidence
+        if status == STATUS_COMPLETE:
+            valid_ass = [a for a in assessments if a.evidence_id]
+            if not valid_ass and request.reported_status == "NOT_STARTED":
+                status = STATUS_INCOMPLETE
+                has_violations = True
+            else:
+                assessments = valid_ass
 
         steps = build_plan_from_assessments(assessments, is_incomplete=has_violations)
 

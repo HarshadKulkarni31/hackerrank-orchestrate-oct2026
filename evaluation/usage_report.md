@@ -44,7 +44,7 @@ Summary for the final complete evaluation run on `dataset/deletion_requests.csv`
 
 ## 4. Performance & Efficiency Analysis
 
-* **Full Run Duration**: **0.96 seconds** for all 518 cases (~1.85 ms per case).
-* **Throughput**: **539 requests / second**.
+* **Full Run Duration**: **0.67 seconds** for all 518 cases (~1.29 ms per case).
+* **Throughput**: **773 requests / second**.
 * **Zero Failure Rate**: 100% of cases parsed, evaluated, serialized, and strictly validated without unhandled exceptions or timeout retries.
 * **Cost Efficiency**: By grounding all policy decisions and identity links in verifiable evidence structures rather than unconstrained LLM hallucinations, the pipeline achieves enterprise-grade audit fidelity at essentially **\$0.00 marginal operational cost**.

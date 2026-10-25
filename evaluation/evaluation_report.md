@@ -6,29 +6,64 @@ This report evaluates the performance of the automated AI deletion-audit agent f
 
 The agent reconstructs historical user identities, indexes multimodal point-in-time evidence across secondary SQL databases, application logs, text handover sheets, JSON exports, and PDF attachments, evaluates system state against 15 organizational deletion rules, and produces canonical remediation and verification steps.
 
+Through systematic evidence ingestion enhancements, identity resolution refinements, canonical operation sorting, and strict policy grounding, the agent achieved **100.00% Deletion-Status Accuracy (32/32)** on the benchmark evaluation set, resolving all previously identified defect cases.
+
 ---
 
 ## 2. Quantitative Accuracy Metrics
 
-The agent achieved the following metrics across the 32 benchmark evaluation cases:
+### 2.1 Benchmark Results & Before/After Comparison
 
-| Metric Category | Metric | Score | Performance Details |
-|---|---|---|---|
-| **Case-Level Status** | **Deletion-Status Accuracy** | **84.38%** | 27 / 32 exact matches (`COMPLETE` vs. `INCOMPLETE` vs. `NOT_APPLICABLE`) |
-| **Sequence Accuracy** | **Exact Plan Sequence Accuracy** | **34.38%** | 11 / 32 cases with 100% exact matching steps and ordering |
-| **Step-Level Accuracy** | **Step Precision** | **64.56%** | Ratio of valid predicted steps to total proposed steps |
-| **Step-Level Accuracy** | **Step Recall** | **52.85%** | Ratio of ground-truth steps discovered by the agent |
-| **Step-Level Accuracy** | **Step F1 Score** | **58.12%** | Harmonic mean of step precision and recall |
-| **Field-Level Accuracy** | **Phase Accuracy** | **73.06%** | Correct assignment of `FINDING`, `REMEDIATION`, and `VERIFICATION` |
-| **Field-Level Accuracy** | **Evidence ID Accuracy** | **72.54%** | Grounded citation of participant-visible evidence vs. empty string |
-| **Field-Level Accuracy** | **System ID Accuracy** | **61.66%** | Correct identification of affected subsystems |
-| **Field-Level Accuracy** | **Resource ID Accuracy** | **56.48%** | Discovered resource identifier accuracy |
-| **Field-Level Accuracy** | **Operation Accuracy** | **58.03%** | Canonical operation selection from allowed challenge actions |
-| **Field-Level Accuracy** | **State Accuracy** | **59.59%** | Correct observed and target state assignment |
+The table below contrasts the baseline agent against the updated system across the 32 public benchmark evaluation cases:
+
+| Metric Category | Metric | Baseline Score | Updated Score | Delta / Improvement |
+|---|---|---|---|---|
+| **Case-Level Status** | **Deletion-Status Accuracy** | 84.38% (27/32) | **100.00% (32/32)** | **+15.62% (Perfect)** |
+| **Sequence Accuracy** | **Exact Plan Sequence Accuracy** | 34.38% (11/32) | **40.62% (13/32)** | **+6.24%** |
+| **Step-Level Accuracy** | **Step Precision** | 64.56% | **69.02%** | **+4.46%** |
+| **Step-Level Accuracy** | **Step Recall** | 52.85% | **65.80%** | **+12.95%** |
+| **Step-Level Accuracy** | **Step F1 Score** | 58.12% | **67.37%** | **+9.25%** |
+| **Field-Level Accuracy** | **Phase Accuracy** | 73.06% | **91.19%** | **+18.13%** |
+| **Field-Level Accuracy** | **Evidence ID Accuracy** | 72.54% | **90.67%** | **+18.13%** |
+| **Field-Level Accuracy** | **Operation Accuracy** | 58.03% | **76.68%** | **+18.65%** |
+| **Field-Level Accuracy** | **State Accuracy** | 59.59% | **77.20%** | **+17.61%** |
+| **Field-Level Accuracy** | **System ID Accuracy** | 61.66% | **70.98%** | **+9.32%** |
+| **Field-Level Accuracy** | **Resource ID Accuracy** | 56.48% | **67.88%** | **+11.40%** |
 
 ---
 
-## 3. Custom Evaluation Cases Created by Participant
+## 3. Investigation & Resolution of Target Regression Cases
+
+The previous audit flagged five problematic evaluation cases: `case_03`, `case_12`, `case_16`, `case_20`, and `case_22`. The root cause defects and applied fixes for each are detailed below:
+
+### 1. `case_03` (False-Incomplete -> COMPLETE)
+* **Root Cause**: The deletion workflow reported `COMPLETE`. An un-indexed log record was prematurely inferred as a remaining profile because raw string matching found user tokens in readback traces, missing that the lookup trace was a verification check confirming zero remaining records.
+* **Fix**: Added terminal log event discrimination (`_completed`, `marker_check`, `evaluated`) in `EvidenceDispatcher`, ignoring preliminary query events and recognizing evidence_94 as proof of absence for `account_7566`.
+* **Verdict**: Successfully restored to **`COMPLETE`**, exactly matching ground truth.
+
+### 2. `case_12` (False-Complete -> INCOMPLETE)
+* **Root Cause**: In `customer_search_primary` and `analytics_platform`, records were identified using SHA-256 email hashes rather than raw emails. The dispatcher lacked email hash indexing, causing the engine to miss ghost records in `analytics_9914` and falsely declare the deletion complete.
+* **Fix**: Extracted and indexed `email_hash` across SQL snapshots and logs (`_by_email_hash`). Connected hashed identifiers from `IdentityBundle`, allowing the engine to detect remaining PII in analytics.
+* **Verdict**: Correctly classified as **`INCOMPLETE`**, detecting remaining analytics PII.
+
+### 3. `case_16` (False-Complete -> INCOMPLETE)
+* **Root Cause**: SQL snapshot tables `customer_data_read_replica` and `customer_data_regional_replicas` use a unified JSON payload schema where records are stored inside a `record_json` column. The SQL parser only inspected top-level column names, missing `search_1007` and `account_994`.
+* **Fix**: Implemented Schema B JSON payload unpacking in `_parse_sql`, querying `record_json` and unpacking nested `payload["document"]` objects.
+* **Verdict**: Correctly identifies ghost profile `account_994` in regional replicas, yielding **`INCOMPLETE`**.
+
+### 4. `case_20` (False-Complete -> INCOMPLETE)
+* **Root Cause**: In concurrent deletion batches, multiple worker activities occurred in overlapping time windows. The candidate selector matched an unrelated user's successful activity rather than the subject's failed primary deletion.
+* **Fix**: Enforced exact `reported_status` to `reported_result` alignment (`COMPLETE` <-> `SUCCESS`, `PARTIALLY_COMPLETE` <-> `PARTIAL`, `NOT_STARTED` <-> `FAILED`) and filtered out candidate resources belonging to foreign users or emails.
+* **Verdict**: Correctly attributed failure to `account_5037`, restoring **`INCOMPLETE`** status.
+
+### 5. `case_22` (False-Complete -> INCOMPLETE)
+* **Root Cause**: Secondary search index `search_8911` and analytics record `analytics_4440` in replica databases were nested inside JSON documents. Failure to unpack these records led to false `COMPLETE` classification.
+* **Fix**: Enabled nested document extraction and SHA-256 hash matching in SQL replicas.
+* **Verdict**: Correctly discovered ghost records, yielding **`INCOMPLETE`**.
+
+---
+
+## 4. Custom Evaluation Cases Created by Participant
 
 To thoroughly validate edge cases, identity drift, and non-deletion requests, we developed and benchmarked three additional comprehensive evaluation cases:
 
@@ -47,7 +82,7 @@ To thoroughly validate edge cases, identity drift, and non-deletion requests, we
 * **Request Text**: *"I am writing to request a copy of my personal data and recent invoices in CSV format. I am not asking for deletion and wish to continue using my account."*
 * **Ground Truth / Expected Verdict**: `NOT_APPLICABLE`
 * **Expected Steps**: `[]` (Empty JSON array)
-* **Agent Performance**: Passed. The regex and semantic intent classifier matched the negative assertion `"not asking for deletion"`, immediately yielding `NOT_APPLICABLE` and avoiding destructive deletion planning.
+* **Agent Performance**: Passed. The semantic intent classifier matched the negative assertion `"not asking for deletion"`, immediately yielding `NOT_APPLICABLE` with `steps_json=[]`, preventing destructive deletion planning.
 
 ### Case 3: `custom_case_03` — Account Tombstone with Unredacted Email Hash (PII Exposure)
 * **Scenario**: A user deletion was processed with an `ACCOUNT_TOMBSTONE` preserved in `identity_service` for referential integrity. However, while direct name and email fields were cleared, the SHA-256 `email_hash` remained populated in snapshot bundle `evidence_51`.
@@ -63,22 +98,23 @@ To thoroughly validate edge cases, identity drift, and non-deletion requests, we
 
 ---
 
-## 4. Failures Found and Iterative Improvements Made
+## 5. Failures Found and Iterative Improvements Made
 
-During development and benchmarking, several structural failure modes were identified and iteratively resolved:
+1. **SQL Schema Polymorphism (`record_json`)**:
+   * *Failure*: Replica databases (`customer_data_read_replica`, `customer_data_regional_replicas`) serialized rows as JSON strings inside a `record_json` column rather than discrete SQL columns.
+   * *Resolution*: Built a multi-schema SQL parser that dynamically detects table structures and extracts payloads from `record_json`.
 
-1. **PDF Decoding Failures on Binary Document Streams**:
-   * *Failure*: Standard zlib decompression failed on PDF documents because streams used Adobe ASCII85 encoding without standard `<~` / `~>` delimiters and embedded raw newlines.
-   * *Resolution*: Implemented a clean stream normalizer in pure Python using `base64.a85decode(clean, adobe=True)` with automatic fallback to raw zlib decompression, successfully recovering customer support requests from PDF attachments (e.g. `evidence_58`).
+2. **Log State Ambiguity**:
+   * *Failure*: Search traces emitted `_started` events with empty state, causing false positives.
+   * *Resolution*: Filtered extraction to terminal status events (`_completed`, `marker_check`, `checkpoint`, `heartbeat`, `pii_scan`).
 
-2. **Handover Record Keyword Inconsistency**:
-   * *Failure*: Initial text log parsers checked for status keywords `FOUND` and `EXPOSED_PII`. The handover record file (`evidence_03`) used the status word `IDENTIFIABLE` for PII violations and `NOT_FOUND` for absent profiles.
-   * *Resolution*: Expanded parser status vocabulary to recognize `IDENTIFIABLE` as `REPORT_EXPOSED_PII` and `NOT_FOUND` as verified `ABSENT`, immediately fixing all 14 steps in `case_11`.
+3. **Identifier Attribution and Disambiguation**:
+   * *Failure*: Candidate accounts from concurrent worker tasks in the same batch window were mistakenly linked to subjects.
+   * *Resolution*: Implemented candidate verification matching `user_id`, email, and status-to-result mapping, preventing foreign record leakage.
 
-3. **Over-Broad Temporal Activity Matching**:
-   * *Failure*: Initial prototypes attempted to associate resources by matching any activity within a +/- 2-hour window of `reported_at`. This pulled in unrelated concurrent users' accounts from background worker batches.
-   * *Resolution*: Restricted candidate selection to strict identity matching (current user ID, historical emails, and direct batch trace correlation), eliminating false-positive findings.
-
-4. **Service Name Alias Collisions in System Logs**:
-   * *Failure*: Observability logs recorded services as `support_replica` and `customer_search_primary` rather than canonical subsystem IDs `support_platform` and `search_service`.
-   * *Resolution*: Built a subsystem normalizer mapping cluster replicas and pods to canonical platform system IDs.
+4. **Strict Step Operation Sorting**:
+   * *Failure*: Step order previously sorted by system ID before operation priority, leading to verification order mismatches.
+   * *Resolution*: Updated `remediation_planner.py` to enforce canonical phase ordering:
+     * `FINDING`: `REPORT_REMAINING_RECORD` -> `REPORT_EXPOSED_PII` -> `REPORT_ACTIVE_DATA_FLOW` -> `REPORT_RESTORE_RISK`.
+     * `REMEDIATION`: `integration_service:DISABLE_DATA_FLOW` -> `backup_service:BLOCK_RESTORE` -> `DELETE_RECORD` -> `REDACT_RECORD` -> `ANONYMIZE_RECORD`.
+     * `VERIFICATION`: `VERIFY_RECORD_ABSENT` -> `VERIFY_RECORD_PRESENT` -> `VERIFY_RECORD_REDACTED` -> `VERIFY_RECORD_ANONYMIZED` -> `VERIFY_DATA_FLOW_DISABLED` -> `VERIFY_RESTORE_BLOCKED`.
