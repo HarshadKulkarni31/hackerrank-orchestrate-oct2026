@@ -389,15 +389,10 @@ def validate_output_csv(
                                         f"Line {line_no} ({case_id}) step {expected_step_no}: verification '{operation}' cites evidence '{evidence_id}' which does not contain claimed resource '{resource_id}' or subject '{case_u}'"
                                     )
                             elif operation == "VERIFY_RECORD_ABSENT":
-                                if not matches_resource and not matches_user and u_set and not (case_u in u_set):
-                                    if origin not in (
-                                        "customer_account_failover_replica_capture",
-                                        "records_assurance_snapshot_bundle",
-                                        "customer_account_service",
-                                    ):
-                                        errors.append(
-                                            f"Line {line_no} ({case_id}) step {expected_step_no}: VERIFY_RECORD_ABSENT cites evidence '{evidence_id}' which is targeted to other subjects ({u_set}) and cannot prove absence for '{case_u}'"
-                                        )
+                                if not matches_resource and not matches_user:
+                                    errors.append(
+                                        f"Line {line_no} ({case_id}) step {expected_step_no}: VERIFY_RECORD_ABSENT cites evidence '{evidence_id}' which does not contain claimed resource '{resource_id}' or subject '{case_u}'"
+                                    )
 
             if status == "COMPLETE":
                 if phase != "VERIFICATION":

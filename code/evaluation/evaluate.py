@@ -348,9 +348,12 @@ Every manifest file in `dataset/evidence_files.csv` ({total_files} files total) 
 ## 6. Sequence Diagnostics & Failure Analysis
 
 Diagnostics across the 32 sample cases indicate:
-- **Status Accuracy**: 31 / 32 cases perfectly aligned. The single non-matching case (`case_04`) involves ambiguous analytics profile attribution without direct identifiers.
+- **Status Alignment**: {metrics.correct_status} / {metrics.total_cases} cases aligned ({metrics.status_accuracy:.2f}%). Cases without resource-specific absence evidence (such as `case_01`, `case_02`, and `case_04`) preserve their unresolved state rather than claiming unsupported absence.
 - **Verification Coverage**: Post-remediation verification checks cover 100% of remediated systems and required retained records.
 - **Ordering**: 100% compliant with canonical DAG ordering: `FINDING` -> `REMEDIATION` -> `VERIFICATION`.
+- **Diagnostic Breakdown**:
+  - Exact sequence matches: {metrics.exact_sequence_matches} / {metrics.total_cases} cases.
+  - Absence grounding: Unobserved candidate accounts with no supporting evidence at `audit_at` are not artificially resolved using ungrounded snapshot IDs.
 """
 
     usage_md = f"""# Token Usage and Cost Analysis Report
@@ -359,10 +362,12 @@ Diagnostics across the 32 sample cases indicate:
 
 This report details the execution telemetry, model invocation counts, token consumption, and cost analysis for the final full-dataset run of the **Ghost Data Still Exists** deletion audit system, which produced the final `output.csv` (518 evaluation cases).
 
-The system utilizes an optimized **Hybrid Symbolic-Neural Architecture**:
-1. High-throughput structured tasks (schema parsing, SQL queries, regex intent filtering, identity resolution, DAG planning, and CSV serialization) are executed deterministically on bare metal with zero API latency and zero inference cost.
-2. Complex multi-modal text and ambiguous multi-lingual request interpretations are handled by neural LLM providers where needed.
-3. This hybrid architecture ensures 100% deterministic reproducibility, zero rate-limiting risk, and sub-second execution across all 518 cases.
+The audited pipeline execution for this run operated as a **100% Deterministic Local Bare-Metal Engine**:
+1. All 518 cases were parsed, cross-referenced, evaluated, and verified using bare-metal Python with zero external model API calls and zero incurred inference cost.
+2. Structured tasks (schema parsing, SQLite table queries, regex intent classification, historical identity resolution, DAG planning, and strict CSV serialization) run with zero network latency and 100% deterministic reproducibility.
+3. Configured capabilities vs. Exercised capabilities:
+   - **Exercised**: Deterministic evidence ingestion across all 94 manifest files, canonical image catalog ingestion (`predefined_catalog`), and deterministic policy assessment.
+   - **Configured (Unexercised in this run)**: Dynamic Gemini 1.5/2.0 multimodal API calls (`gemini_vlm`) for ad-hoc runtime inspection when `GEMINI_API_KEY` is provided.
 
 ---
 
@@ -370,11 +375,11 @@ The system utilizes an optimized **Hybrid Symbolic-Neural Architecture**:
 
 ### Model Provider & Runtime Information
 
-* **Architecture**: Hybrid Deterministic Core with Multi-Modal Neural Verification
-* **Primary LLM Provider**: Google Cloud Vertex AI / Gemini API
+* **Executed Runtime**: Pure Python 3.14 (Bare-Metal Local Sandbox)
+* **Execution Mode**: Deterministic Local Pipeline (Zero API invocations during audited benchmark run)
+* **Configured Fallback Provider**: Google Cloud Vertex AI / Gemini API (`gemini-2.0-flash` / `gemini-1.5-flash`)
 * **Runtime Coding Harness**: Antigravity 2.0
-* **Development & Inference Model**: `Gemini 3.8 Flash (Medium)` / `gemini-3.8-flash`
-* **Inference Pipeline Runtime**: Pure Python 3.14 (Bare-Metal Local Sandbox)
+* **Development & Pairing Model**: `Gemini 3.8 Flash (Medium)`
 
 ---
 

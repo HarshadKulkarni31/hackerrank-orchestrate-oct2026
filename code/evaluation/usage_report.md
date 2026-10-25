@@ -4,10 +4,12 @@
 
 This report details the execution telemetry, model invocation counts, token consumption, and cost analysis for the final full-dataset run of the **Ghost Data Still Exists** deletion audit system, which produced the final `output.csv` (518 evaluation cases).
 
-The system utilizes an optimized **Hybrid Symbolic-Neural Architecture**:
-1. High-throughput structured tasks (schema parsing, SQL queries, regex intent filtering, identity resolution, DAG planning, and CSV serialization) are executed deterministically on bare metal with zero API latency and zero inference cost.
-2. Complex multi-modal text and ambiguous multi-lingual request interpretations are handled by neural LLM providers where needed.
-3. This hybrid architecture ensures 100% deterministic reproducibility, zero rate-limiting risk, and sub-second execution across all 518 cases.
+The audited pipeline execution for this run operated as a **100% Deterministic Local Bare-Metal Engine**:
+1. All 518 cases were parsed, cross-referenced, evaluated, and verified using bare-metal Python with zero external model API calls and zero incurred inference cost.
+2. Structured tasks (schema parsing, SQLite table queries, regex intent classification, historical identity resolution, DAG planning, and strict CSV serialization) run with zero network latency and 100% deterministic reproducibility.
+3. Configured capabilities vs. Exercised capabilities:
+   - **Exercised**: Deterministic evidence ingestion across all 94 manifest files, canonical image catalog ingestion (`predefined_catalog`), and deterministic policy assessment.
+   - **Configured (Unexercised in this run)**: Dynamic Gemini 1.5/2.0 multimodal API calls (`gemini_vlm`) for ad-hoc runtime inspection when `GEMINI_API_KEY` is provided.
 
 ---
 
@@ -15,11 +17,11 @@ The system utilizes an optimized **Hybrid Symbolic-Neural Architecture**:
 
 ### Model Provider & Runtime Information
 
-* **Architecture**: Hybrid Deterministic Core with Multi-Modal Neural Verification
-* **Primary LLM Provider**: Google Cloud Vertex AI / Gemini API
+* **Executed Runtime**: Pure Python 3.14 (Bare-Metal Local Sandbox)
+* **Execution Mode**: Deterministic Local Pipeline (Zero API invocations during audited benchmark run)
+* **Configured Fallback Provider**: Google Cloud Vertex AI / Gemini API (`gemini-2.0-flash` / `gemini-1.5-flash`)
 * **Runtime Coding Harness**: Antigravity 2.0
-* **Development & Inference Model**: `Gemini 3.8 Flash (Medium)` / `gemini-3.8-flash`
-* **Inference Pipeline Runtime**: Pure Python 3.14 (Bare-Metal Local Sandbox)
+* **Development & Pairing Model**: `Gemini 3.8 Flash (Medium)`
 
 ---
 
@@ -46,7 +48,7 @@ Summary for the final complete evaluation run on `dataset/deletion_requests.csv`
 
 ## 4. Performance & Efficiency Analysis
 
-* **Full Run Duration**: **0.26 seconds** for all 518 cases (~0.51 ms per case).
-* **Throughput**: **1974 requests / second**.
+* **Full Run Duration**: **0.27 seconds** for all 518 cases (~0.53 ms per case).
+* **Throughput**: **1896 requests / second**.
 * **Zero Failure Rate**: 100% of cases parsed, evaluated, serialized, and strictly validated without unhandled exceptions or timeout retries.
 * **Cost Efficiency**: By grounding all policy decisions and identity links in verifiable evidence structures rather than unconstrained LLM hallucinations, the pipeline achieves enterprise-grade audit fidelity at essentially **\$0.00 marginal operational cost**.

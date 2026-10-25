@@ -162,6 +162,35 @@ class TestEvidenceGroundingAndConflicts(unittest.TestCase):
             if old_key:
                 os.environ["GEMINI_API_KEY"] = old_key
 
+    def test_dynamic_vlm_extraction_provenance_marking(self):
+        """Dynamic Gemini extraction must mark records as gemini_vlm without catalog confusion."""
+        import os
+        from unittest.mock import patch
+        disp = EvidenceDispatcher(Path("dataset"))
+        mock_rec = EvidenceRecord(
+            evidence_id="evidence_dynamic_test",
+            captured_at=datetime(2026, 9, 26, 11, 0, tzinfo=timezone.utc),
+            system_id="account_service",
+            resource_id="account_dyn_01",
+            data_category="USER_PROFILE",
+            user_id="user_dyn",
+            email="dyn@example.com",
+            state="PRESENT",
+        )
+        with patch.object(disp, "_dynamic_vlm_extract", return_value=[mock_rec]):
+            with patch.dict(os.environ, {"GEMINI_API_KEY": "test_fake_api_key"}):
+                method = disp._parse_image(
+                    "evidence_dynamic_test",
+                    datetime(2026, 9, 26, 11, 0, tzinfo=timezone.utc),
+                    Path("dataset/evidence/images/evidence_04.png"),
+                    origin="admin_console",
+                )
+                self.assertEqual(method, "gemini_vlm")
+                self.assertEqual(disp.file_provenance["evidence_dynamic_test"]["extraction_method"], "gemini_vlm")
+                dyn_recs = [r for r in disp.records if r.evidence_id == "evidence_dynamic_test"]
+                self.assertEqual(len(dyn_recs), 1)
+                self.assertEqual(dyn_recs[0].extraction_method, "gemini_vlm")
+
     def test_legal_retention_pdf_extraction(self):
         """evidence_27 PDF must parse disputed orders, user references, and retain dates."""
         disp = EvidenceDispatcher(Path("dataset"))
@@ -216,6 +245,75 @@ class TestEvidenceGroundingAndConflicts(unittest.TestCase):
         self.assertFalse(ass.is_violation)
         self.assertEqual(ass.required_action, "RETAIN")
         self.assertEqual(ass.verification_operation, "VERIFY_RECORD_PRESENT")
+
+    def test_snapshot_with_different_account_cannot_prove_absence(self):
+        """A snapshot containing account_005 (different account) cannot establish absence for account_test."""
+        req = DeletionRequest(
+            case_id="case_diff_account",
+            email="test@example.com",
+            requested_at=datetime(2026, 8, 1, 10, 0, tzinfo=timezone.utc),
+            reported_status="COMPLETE",
+            reported_at=datetime(2026, 8, 2, 10, 0, tzinfo=timezone.utc),
+            audit_at=datetime(2026, 8, 10, 10, 0, tzinfo=timezone.utc),
+            request_text="Delete my account details completely.",
+        )
+        rec_diff = EvidenceRecord(
+            evidence_id="evidence_snap_other",
+            captured_at=datetime(2026, 8, 3, 10, 0, tzinfo=timezone.utc),
+            system_id="account_service",
+            resource_id="account_005",
+            data_category="USER_PROFILE",
+            user_id="user_other",
+            email="other@example.com",
+            state="PRESENT",
+        )
+        self.dispatcher.records.append(rec_diff)
+        self.dispatcher._by_resource["account_005"] = [rec_diff]
+        engine = DecisionEngine(self.resolver, self.policy, self.dispatcher, [])
+        pred = engine.evaluate_case(req)
+        # Must not produce VERIFY_RECORD_ABSENT for account_test citing evidence_snap_other
+        for s in pred.steps:
+            if s.resource_id == "account_test":
+                self.assertNotEqual(s.operation, "VERIFY_RECORD_ABSENT")
+                self.assertNotEqual(s.evidence_id, "evidence_snap_other")
+
+    def test_ambiguous_identity_matches_cannot_establish_absence(self):
+        """When an email maps ambiguously to multiple users, unverified snapshots cannot prove absence."""
+        user_a = UserIdentity("user_A", "User A", "shared@example.com", "+111", "hashA", datetime(2026, 1, 1, tzinfo=timezone.utc))
+        user_b = UserIdentity("user_B", "User B", "shared@example.com", "+222", "hashB", datetime(2026, 1, 1, tzinfo=timezone.utc))
+        resolver = IdentityResolver([user_a, user_b], [])
+        req = DeletionRequest(
+            case_id="case_ambiguous",
+            email="shared@example.com",
+            requested_at=datetime(2026, 8, 1, 10, 0, tzinfo=timezone.utc),
+            reported_status="COMPLETE",
+            reported_at=datetime(2026, 8, 2, 10, 0, tzinfo=timezone.utc),
+            audit_at=datetime(2026, 8, 10, 10, 0, tzinfo=timezone.utc),
+            request_text="Please delete my account shared@example.com.",
+        )
+        engine = DecisionEngine(resolver, self.policy, self.dispatcher, [])
+        pred = engine.evaluate_case(req)
+        self.assertEqual(pred.deletion_status, STATUS_INCOMPLETE)
+        for s in pred.steps:
+            self.assertNotEqual(s.operation, "VERIFY_RECORD_ABSENT")
+
+    def test_missing_resource_specific_evidence_preserves_unresolved(self):
+        """Account candidate without resource-specific evidence preserves unresolved state."""
+        req = DeletionRequest(
+            case_id="case_missing_res_ev",
+            email="test@example.com",
+            requested_at=datetime(2026, 8, 1, 10, 0, tzinfo=timezone.utc),
+            reported_status="COMPLETE",
+            reported_at=datetime(2026, 8, 2, 10, 0, tzinfo=timezone.utc),
+            audit_at=datetime(2026, 8, 10, 10, 0, tzinfo=timezone.utc),
+            request_text="Delete my personal account.",
+        )
+        engine = DecisionEngine(self.resolver, self.policy, self.dispatcher, [])
+        pred = engine.evaluate_case(req)
+        self.assertEqual(pred.deletion_status, STATUS_INCOMPLETE)
+        # Verify no fake absence steps are generated
+        absence_steps = [s for s in pred.steps if s.operation == "VERIFY_RECORD_ABSENT"]
+        self.assertEqual(len(absence_steps), 0)
 
 
 if __name__ == "__main__":

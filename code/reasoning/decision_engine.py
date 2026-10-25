@@ -252,50 +252,32 @@ class DecisionEngine:
 
                 if sys_id == "account_service":
                     rep_ev = self.dispatcher.find_records_by_resource_id(rid, request.audit_at)
-                    ev_ref = ""
-                    observed_state = "UNRESOLVED"
-                    is_violation = True
-
                     if rep_ev:
                         # Authoritative evidence explicitly referencing this account
                         rep_ev.sort(key=lambda r: r.captured_at, reverse=True)
                         present_ev = [r for r in rep_ev if r.state == "PRESENT"]
                         if present_ev:
                             ev_ref = present_ev[0].evidence_id
-                            observed_state = "PRESENT"
-                            is_violation = True
+                            ass = self.policy.assess_record(sys_id, rid, cat, "PRESENT", ev_ref, True)
                         else:
                             ev_ref = rep_ev[0].evidence_id
                             observed_state = rep_ev[0].state
                             is_violation = (observed_state != "ABSENT")
+                            ass = self.policy.assess_record(sys_id, rid, cat, observed_state, ev_ref, is_violation)
                     else:
-                        # Check if an authoritative snapshot bundle directly covers this user's subject
-                        account_snapshots = [
-                            ("evidence_05", datetime(2026, 9, 21, 10, 0, tzinfo=timezone.utc)),
-                            ("evidence_51", datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)),
-                            ("evidence_92", datetime(2026, 9, 15, 11, 44, 55, tzinfo=timezone.utc)),
-                            ("evidence_54", datetime(2026, 9, 2, 23, 0, tzinfo=timezone.utc)),
-                            ("evidence_10", datetime(2026, 8, 27, 12, 0, tzinfo=timezone.utc)),
-                            ("evidence_15", datetime(2026, 8, 2, 7, 0, tzinfo=timezone.utc)),
-                        ]
-                        user_ev_ids = {r.evidence_id for r in direct_ev}
-                        for snap_id, snap_time in account_snapshots:
-                            if snap_id in user_ev_ids and snap_time <= request.audit_at:
-                                ev_ref = snap_id
-                                observed_state = "ABSENT"
-                                is_violation = False
-                                break
-
-                    if is_violation:
-                        # If no snapshot proved absence, preserve unresolved state and do not claim ABSENT
-                        if not ev_ref:
-                            ev_ref = activity_evidence_map.get(rid, "")
-                        if not ev_ref:
-                            # Contract requires every finding step to cite a participant-visible file_id, activity_id, or audit_id for that resource
-                            continue
-                        ass = self.policy.assess_record(sys_id, rid, cat, "PRESENT", ev_ref, True)
-                    else:
-                        ass = self.policy.assess_record(sys_id, rid, cat, "ABSENT", ev_ref, False)
+                        # Unobserved account with no resource-specific evidence: preserve unresolved state
+                        ass = RecordAssessment(
+                            system_id=sys_id,
+                            resource_id=rid,
+                            data_category=cat,
+                            required_action="DELETE",
+                            observed_state="UNRESOLVED",
+                            is_violation=False,
+                            evidence_id="",
+                            violation_operation=None,
+                            remediation_operation=None,
+                            verification_operation="VERIFY_RECORD_ABSENT",
+                        )
                     assessments.append(ass)
                 elif sys_id == "security_service":
                     ev_ref = r_evs[0].evidence_id if r_evs else activity_evidence_map.get(rid, "")

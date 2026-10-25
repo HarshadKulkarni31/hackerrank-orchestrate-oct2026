@@ -17,15 +17,17 @@ class TestSerialization(unittest.TestCase):
             preds = [
                 CasePrediction(
                     case_id="case_001",
-                    deletion_status="COMPLETE",
-                    steps=[
-                        Step(1, "VERIFICATION", "account_service", "account_001", "VERIFY_RECORD_ABSENT", "ABSENT", "evidence_54")
-                    ],
+                    deletion_status="NOT_APPLICABLE",
+                    steps=[],
                 ),
                 CasePrediction(
                     case_id="case_002",
-                    deletion_status="NOT_APPLICABLE",
-                    steps=[],
+                    deletion_status="INCOMPLETE",
+                    steps=[
+                        Step(1, "FINDING", "account_service", "account_005", "REPORT_REMAINING_RECORD", "PRESENT", "evidence_54"),
+                        Step(2, "REMEDIATION", "account_service", "account_005", "DELETE_RECORD", "ABSENT", ""),
+                        Step(3, "VERIFICATION", "account_service", "account_005", "VERIFY_RECORD_ABSENT", "ABSENT", ""),
+                    ],
                 ),
             ]
 
