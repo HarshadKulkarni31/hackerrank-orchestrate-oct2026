@@ -603,6 +603,9 @@ class EvidenceDispatcher:
                 if not raw_sys_id or not rid or rid in ("null", "None", ""):
                     continue
 
+                if "started" in event or "start" in event or "initiating" in event:
+                    continue
+
                 # Filter: ONLY state-bearing events
                 is_state_event = (
                     "completed" in event
@@ -629,6 +632,8 @@ class EvidenceDispatcher:
                     sys_id = "search_service"
                 elif "analytics" in sys_id:
                     sys_id = "analytics_platform"
+                elif "export" in sys_id:
+                    sys_id = "export_service"
                 elif "integration" in sys_id or "connector" in sys_id:
                     sys_id = "integration_service"
                 elif "backup" in sys_id:
@@ -639,7 +644,7 @@ class EvidenceDispatcher:
                 u, em, eh = trace_identities.get(tid, (None, None, None))
 
                 # Check inline tokens
-                for k in ("lookup_key", "match_key", "email", "customer_email", "correlation_key", "subject_reference", "matched_value"):
+                for k in ("lookup_key", "match_key", "email", "customer_email", "owner_email", "correlation_key", "subject_reference", "matched_value"):
                     val = str(tokens.get(k, "")).strip('"')
                     if not val or val in ("null", "None"):
                         continue
@@ -652,10 +657,17 @@ class EvidenceDispatcher:
 
                 res_val = str(tokens.get("result", "")).strip('"').upper()
                 if sys_id == "account_service":
-                    st = "ABSENT" if (tokens.get("http_status") in ("404", 404, '"404"') or tokens.get("rows") in ("0", 0, '"0"') or res_val == "NOT_FOUND") else "PRESENT"
+                    st = "ABSENT" if (tokens.get("http_status") in ("404", 404, '"404"') or tokens.get("rows") in ("0", 0, '"0"') or res_val in ("NOT_FOUND", "ABSENT")) else "PRESENT"
                     self._add_record(
                         EvidenceRecord(
                             file_id, captured_at, sys_id, rid, "USER_PROFILE", u, em, eh, st, False
+                        )
+                    )
+                elif sys_id == "export_service":
+                    st = "ABSENT" if (tokens.get("available") in (False, "false", "0", 0) or tokens.get("http_status") in ("404", 404, '"404"')) else "PRESENT"
+                    self._add_record(
+                        EvidenceRecord(
+                            file_id, captured_at, sys_id, rid, "USER_EXPORT", u, em, eh, st, False
                         )
                     )
                 elif sys_id == "search_service":

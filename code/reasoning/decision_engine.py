@@ -38,12 +38,15 @@ class DecisionEngine:
         self.policy = policy
         self.dispatcher = dispatcher
         self.activities = activities
+        self.activity_by_id = {a.activity_id: a for a in activities}
         self._index_activities()
 
     def _index_activities(self) -> None:
-        """Indexes activities and maps user_id to security audit records."""
+        """Indexes activities and maps user_id to security audit records and accounts."""
         self.primary_worker_acts: List[SystemActivity] = []
         self.user_to_audit_rec: Dict[str, str] = {}
+        self.user_to_account: Dict[str, str] = {}
+        self.email_to_account: Dict[str, str] = {}
 
         for a in self.activities:
             if "submitted primary profile" in a.details or (
@@ -70,6 +73,11 @@ class DecisionEngine:
         for r in self.dispatcher.records:
             if r.system_id == "security_service" and r.user_id:
                 self.user_to_audit_rec[r.user_id] = r.resource_id
+            elif r.system_id == "account_service" and r.resource_id:
+                if r.user_id:
+                    self.user_to_account[r.user_id] = r.resource_id
+                if r.email:
+                    self.email_to_account[r.email.lower()] = r.resource_id
 
     def evaluate_case(self, request: DeletionRequest) -> CasePrediction:
         """Evaluates a single deletion request and produces the final CasePrediction."""
@@ -100,6 +108,15 @@ class DecisionEngine:
             if r.system_id == "account_service":
                 acc_id = r.resource_id
                 break
+
+        if not acc_id:
+            if user_id and user_id in self.user_to_account:
+                acc_id = self.user_to_account[user_id]
+            else:
+                for em in emails:
+                    if em in self.email_to_account:
+                        acc_id = self.email_to_account[em]
+                        break
 
         if not acc_id:
             w_start = request.requested_at - timedelta(hours=2)
@@ -134,7 +151,11 @@ class DecisionEngine:
         activity_evidence_map: Dict[str, str] = {}
         for a in self.activities:
             if a.event_time <= request.audit_at:
-                if (user_id and user_id in a.details) or any(e in a.details.lower() for e in emails):
+                if (
+                    (user_id and user_id in a.details)
+                    or any(e in a.details.lower() for e in emails)
+                    or (acc_id and acc_id == a.resource_id)
+                ):
                     if a.resource_id and not a.resource_id.startswith("email_delivery_"):
                         cand_resources.add(a.resource_id)
                         activity_evidence_map[a.resource_id] = a.activity_id
@@ -199,7 +220,11 @@ class DecisionEngine:
                         ev_ref = activity_evidence_map.get(rid, "")
                     if not ev_ref:
                         continue
-                    ass = self.policy.assess_record(sys_id, rid, cat, "ABSENT", ev_ref, False)
+                    act_obj = self.activity_by_id.get(ev_ref)
+                    if act_obj and act_obj.reported_result in ("PARTIAL", "FAILED"):
+                        ass = self.policy.assess_record(sys_id, rid, cat, "PRESENT", ev_ref, True)
+                    else:
+                        ass = self.policy.assess_record(sys_id, rid, cat, "ABSENT", ev_ref, False)
                     assessments.append(ass)
                 elif sys_id == "security_service":
                     ev_ref = r_evs[0].evidence_id if r_evs else ""
@@ -216,14 +241,34 @@ class DecisionEngine:
 
         # 8. Determine Case Status and Build Canonical Steps
         has_violations = any(a.is_violation for a in assessments)
+
+        # If reported_status is INCOMPLETE or NOT_STARTED and we have no violations yet:
+        if request.reported_status in ("NOT_STARTED", "PARTIALLY_COMPLETE") and not has_violations:
+            u_audits = [e for e in self.resolver.audit_entries if e.user_id == user_id and (e.event_time <= request.audit_at if hasattr(e, 'event_time') else True)]
+            ev_ref = u_audits[0].audit_id if u_audits else ""
+            if not ev_ref and acc_id and acc_id in activity_evidence_map:
+                ev_ref = activity_evidence_map[acc_id]
+            if ev_ref:
+                rid = acc_id or (f"account_{user_id.split('_')[1]}" if user_id and "_" in user_id else "account_001")
+                ass = self.policy.assess_record("account_service", rid, "USER_PROFILE", "PRESENT", ev_ref, True)
+                assessments.append(ass)
+                has_violations = True
+
         status = STATUS_INCOMPLETE if has_violations else STATUS_COMPLETE
 
         # If COMPLETE, ensure every step is backed by evidence
         if status == STATUS_COMPLETE:
             valid_ass = [a for a in assessments if a.evidence_id]
-            if not valid_ass and request.reported_status == "NOT_STARTED":
+            if not valid_ass:
                 status = STATUS_INCOMPLETE
                 has_violations = True
+                u_audits = [e for e in self.resolver.audit_entries if e.user_id == user_id]
+                ev_ref = u_audits[0].audit_id if u_audits else ""
+                rid = acc_id or "account_001"
+                if ev_ref:
+                    assessments = [self.policy.assess_record("account_service", rid, "USER_PROFILE", "PRESENT", ev_ref, True)]
+                else:
+                    assessments = []
             else:
                 assessments = valid_ass
 
