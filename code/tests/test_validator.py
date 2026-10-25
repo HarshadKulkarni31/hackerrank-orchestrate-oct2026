@@ -47,6 +47,32 @@ class TestOutputValidator(unittest.TestCase):
         self.assertFalse(is_valid)
         self.assertTrue(any("is AFTER case audit_at" in err for err in errors))
 
+    def test_validator_rejects_irrelevant_evidence_system(self):
+        # evidence_37 origin is security_service; citing it for account_service must be rejected
+        steps_json = '[{"step_no": 1, "phase": "VERIFICATION", "system_id": "account_service", "resource_id": "account_001", "operation": "VERIFY_RECORD_ABSENT", "state": "ABSENT", "evidence_id": "evidence_37"}]'
+        with tempfile.NamedTemporaryFile("w+", delete=False, suffix=".csv", encoding="utf-8", newline="") as tf:
+            writer = csv.writer(tf)
+            writer.writerow(["case_id", "deletion_status", "steps_json"])
+            writer.writerow(["case_01", "COMPLETE", steps_json])
+            tf_path = Path(tf.name)
+
+        is_valid, errors = validate_output_csv(tf_path, ["case_01"], Path("dataset"))
+        self.assertFalse(is_valid)
+        self.assertTrue(any("not relevant to system 'account_service'" in err for err in errors))
+
+    def test_validator_rejects_mismatched_activity_resource(self):
+        # activity_3342 targets account_001; citing it for account_9999 must be rejected
+        steps_json = '[{"step_no": 1, "phase": "VERIFICATION", "system_id": "account_service", "resource_id": "account_9999", "operation": "VERIFY_RECORD_ABSENT", "state": "ABSENT", "evidence_id": "activity_3342"}]'
+        with tempfile.NamedTemporaryFile("w+", delete=False, suffix=".csv", encoding="utf-8", newline="") as tf:
+            writer = csv.writer(tf)
+            writer.writerow(["case_id", "deletion_status", "steps_json"])
+            writer.writerow(["case_01", "COMPLETE", steps_json])
+            tf_path = Path(tf.name)
+
+        is_valid, errors = validate_output_csv(tf_path, ["case_01"], Path("dataset"))
+        self.assertFalse(is_valid)
+        self.assertTrue(any("concerns resource 'account_001', not claimed resource 'account_9999'" in err for err in errors))
+
 
 if __name__ == "__main__":
     unittest.main()

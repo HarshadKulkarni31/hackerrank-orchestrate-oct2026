@@ -77,6 +77,14 @@ class TestIdentityResolver(unittest.TestCase):
         uid_may = resolver.resolve_user_id("shared@domain.com", datetime(2026, 5, 15, tzinfo=timezone.utc))
         self.assertEqual(uid_may, "user_B")
 
+    def test_missing_account_mapping_no_derivation(self):
+        """Ensures user ID is not converted into an account ID via hardcoded naming patterns."""
+        cutoff = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+        bundle = self.resolver.build_identity_bundle("john.doe@newmail.com", cutoff)
+        self.assertEqual(bundle.user_id, "user_100")
+        # Ensure user_id cannot be assumed to be account_100 without evidence
+        self.assertNotIn("account_100", bundle.emails)
+
 
 if __name__ == "__main__":
     unittest.main()

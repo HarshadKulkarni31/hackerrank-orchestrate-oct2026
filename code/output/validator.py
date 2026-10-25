@@ -38,7 +38,27 @@ def validate_output_csv(
     # 1. Load Ground Truth Evidence Metadata for Grounding & Temporal Checks
     valid_evidence_ids: Set[str] = set()
     evidence_timestamps: Dict[str, datetime] = {}
+    evidence_origins: Dict[str, str] = {}
+    activity_systems: Dict[str, str] = {}
+    activity_resources: Dict[str, str] = {}
     case_audit_times: Dict[str, datetime] = {}
+
+    origin_to_systems: Dict[str, Set[str]] = {
+        "account_admin_portal": {"account_service", "support_platform"},
+        "customer_account_service": {"account_service"},
+        "search_index_service": {"search_service"},
+        "search_index_admin": {"search_service"},
+        "integration_management_service": {"integration_service"},
+        "integration_admin": {"integration_service"},
+        "analytics_platform": {"analytics_platform"},
+        "export_service": {"export_service"},
+        "support_platform": {"support_platform"},
+        "backup_service": {"backup_service"},
+        "security_service": {"security_service"},
+        "identity_service": {"identity_service"},
+        "marketing_platform": {"marketing_platform"},
+        "customer_account_failover_replica_capture": {"account_service"},
+    }
 
     ev_files_csv = dataset_dir / "evidence_files.csv"
     if ev_files_csv.exists():
@@ -46,6 +66,8 @@ def validate_output_csv(
             for r in csv.DictReader(f):
                 fid = r["file_id"]
                 valid_evidence_ids.add(fid)
+                if r.get("origin"):
+                    evidence_origins[fid] = r["origin"]
                 if r.get("captured_at"):
                     try:
                         evidence_timestamps[fid] = datetime.fromisoformat(
@@ -60,6 +82,10 @@ def validate_output_csv(
             for r in csv.DictReader(f):
                 aid = r["activity_id"]
                 valid_evidence_ids.add(aid)
+                if r.get("target_system"):
+                    activity_systems[aid] = r["target_system"]
+                if r.get("resource_id"):
+                    activity_resources[aid] = r["resource_id"]
                 if r.get("event_time"):
                     try:
                         evidence_timestamps[aid] = datetime.fromisoformat(
@@ -178,6 +204,7 @@ def validate_output_csv(
 
             phase = step.get("phase")
             system_id = step.get("system_id")
+            resource_id = step.get("resource_id")
             operation = step.get("operation")
             state = step.get("state")
             evidence_id = step.get("evidence_id", "")
@@ -228,6 +255,28 @@ def validate_output_csv(
                     if ev_captured_at > audit_cutoff:
                         errors.append(
                             f"Line {line_no} ({case_id}) step {expected_step_no}: cited evidence '{evidence_id}' captured at {ev_captured_at.isoformat()} is AFTER case audit_at {audit_cutoff.isoformat()}"
+                        )
+
+                # Semantic relevance checks: validate activity target system and resource
+                if evidence_id in activity_systems:
+                    act_sys = activity_systems[evidence_id]
+                    if system_id and act_sys and system_id != act_sys:
+                        errors.append(
+                            f"Line {line_no} ({case_id}) step {expected_step_no}: cited activity '{evidence_id}' targets system '{act_sys}', not claimed system '{system_id}'"
+                        )
+                    act_res = activity_resources.get(evidence_id)
+                    if resource_id and act_res and resource_id != act_res:
+                        errors.append(
+                            f"Line {line_no} ({case_id}) step {expected_step_no}: cited activity '{evidence_id}' concerns resource '{act_res}', not claimed resource '{resource_id}'"
+                        )
+
+                # Validate dedicated evidence file origin relevance
+                if evidence_id in evidence_origins:
+                    origin = evidence_origins[evidence_id]
+                    allowed_sys = origin_to_systems.get(origin)
+                    if allowed_sys and system_id not in allowed_sys:
+                        errors.append(
+                            f"Line {line_no} ({case_id}) step {expected_step_no}: evidence '{evidence_id}' from origin '{origin}' is not relevant to system '{system_id}'"
                         )
 
             if status == "COMPLETE":
