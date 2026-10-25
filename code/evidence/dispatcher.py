@@ -171,6 +171,17 @@ class EvidenceDispatcher:
                         )
                     )
 
+                # export_service
+                for exp in exports.get("export_service", {}).get("exports", []):
+                    u = exp.get("customer_reference")
+                    em = exp.get("owner_email") or exp.get("email")
+                    self._add_record(
+                        EvidenceRecord(
+                            file_id, captured_at, "export_service", exp.get("resource_id"),
+                            "USER_EXPORT", u, em, None, "PRESENT", False
+                        )
+                    )
+
                 # backup_service
                 for bk in exports.get("backup_service", {}).get("restore_entries", []):
                     al = bk.get("restore_allowed") in (True, "true", 1, "1")
@@ -308,10 +319,22 @@ class EvidenceDispatcher:
                         except Exception:
                             payload = {}
 
-                        u = payload.get("customer_reference") or payload.get("user_id") or payload.get("subject_reference")
-                        em = payload.get("email") or payload.get("owner_email") or payload.get("customer_email")
-                        eh = payload.get("email_hash")
-                        ph = payload.get("phone")
+                        doc = payload.get("document") if isinstance(payload.get("document"), dict) else {}
+                        u = (
+                            payload.get("customer_reference")
+                            or payload.get("user_id")
+                            or payload.get("subject_reference")
+                            or doc.get("customer_reference")
+                            or doc.get("user_id")
+                        )
+                        em = (
+                            payload.get("email")
+                            or payload.get("owner_email")
+                            or payload.get("customer_email")
+                            or doc.get("email")
+                        )
+                        eh = payload.get("email_hash") or doc.get("email_hash")
+                        ph = payload.get("phone") or doc.get("phone")
 
                         if "account" in orig_sys or "profile" in coll:
                             self._add_record(
@@ -531,6 +554,8 @@ class EvidenceDispatcher:
                     or "checkpoint" in event
                     or "result" in event
                     or "heartbeat" in event
+                    or "pii_scan" in event
+                    or "evaluated" in event
                 )
                 if not is_state_event:
                     continue
@@ -618,7 +643,11 @@ class EvidenceDispatcher:
                         )
                     )
                 elif sys_id == "backup_service":
-                    allowed = tokens.get("restore_allowed") in (True, "true", 1, "1")
+                    allowed = (
+                        tokens.get("restore_allowed") in (True, "true", 1, "1")
+                        or tokens.get("eligible") in (True, "true", 1, "1")
+                        or tokens.get("deletion_block") in (False, "false", 0, "0")
+                    )
                     st = "ACTIVE" if allowed else "BLOCKED"
                     self._add_record(
                         EvidenceRecord(
