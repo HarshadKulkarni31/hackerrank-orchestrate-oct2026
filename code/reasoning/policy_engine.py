@@ -1,9 +1,11 @@
 """Policy engine for applying deletion_rules.csv to candidate records."""
 
+import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 from code.schemas import DeletionRule
 
+logger = logging.getLogger("ghost_data_audit.policy")
 
 CATEGORY_ACTION_MAP = {
     "USER_PROFILE": "DELETE",
@@ -21,6 +23,7 @@ CATEGORY_ACTION_MAP = {
     "LEGAL_HOLD_RECORD": "RETAIN",
     "BACKUP_ARCHIVE": "RETAIN",
     "ACCOUNT_TOMBSTONE": "REDACT",
+    "DATA_FLOW": "DISABLE",
 }
 
 
@@ -45,7 +48,9 @@ class PolicyEngine:
     def get_required_action(self, data_category: str) -> str:
         if data_category in self.rules:
             return self.rules[data_category].required_action
-        return CATEGORY_ACTION_MAP.get(data_category, "DELETE")
+        if data_category in CATEGORY_ACTION_MAP:
+            return CATEGORY_ACTION_MAP[data_category]
+        raise ValueError(f"Unknown data category: '{data_category}'")
 
     def assess_record(
         self,
@@ -58,39 +63,94 @@ class PolicyEngine:
         is_active_flow: bool = False,
         is_restore_risk: bool = False,
     ) -> RecordAssessment:
-        action = self.get_required_action(data_category)
+        # 1. Explicit Data Flow modeling (integration_service)
+        if data_category == "DATA_FLOW" or system_id == "integration_service":
+            if is_active_flow or observed_state == "ACTIVE":
+                return RecordAssessment(
+                    system_id="integration_service",
+                    resource_id=resource_id,
+                    data_category="DATA_FLOW",
+                    required_action="DISABLE",
+                    observed_state="ACTIVE",
+                    is_violation=True,
+                    evidence_id=evidence_id,
+                    violation_operation="REPORT_ACTIVE_DATA_FLOW",
+                    remediation_operation="DISABLE_DATA_FLOW",
+                    verification_operation="VERIFY_DATA_FLOW_DISABLED",
+                )
+            else:
+                return RecordAssessment(
+                    system_id="integration_service",
+                    resource_id=resource_id,
+                    data_category="DATA_FLOW",
+                    required_action="DISABLE",
+                    observed_state="DISABLED",
+                    is_violation=False,
+                    evidence_id=evidence_id,
+                    verification_operation="VERIFY_DATA_FLOW_DISABLED",
+                )
 
-        # Case 1: Active data flow
-        if is_active_flow or (system_id == "integration_service" and observed_state == "ACTIVE"):
+        # 2. Explicit Restore Risk / Backup modeling (backup_service)
+        if data_category == "BACKUP_ARCHIVE" or system_id == "backup_service":
+            if is_restore_risk or observed_state == "ACTIVE":
+                return RecordAssessment(
+                    system_id="backup_service",
+                    resource_id=resource_id,
+                    data_category="BACKUP_ARCHIVE",
+                    required_action="BLOCK",
+                    observed_state="ACTIVE",
+                    is_violation=True,
+                    evidence_id=evidence_id,
+                    violation_operation="REPORT_RESTORE_RISK",
+                    remediation_operation="BLOCK_RESTORE",
+                    verification_operation="VERIFY_RESTORE_BLOCKED",
+                )
+            elif observed_state == "BLOCKED":
+                return RecordAssessment(
+                    system_id="backup_service",
+                    resource_id=resource_id,
+                    data_category="BACKUP_ARCHIVE",
+                    required_action="BLOCK",
+                    observed_state="BLOCKED",
+                    is_violation=False,
+                    evidence_id=evidence_id,
+                    verification_operation="VERIFY_RESTORE_BLOCKED",
+                )
+            else:
+                return RecordAssessment(
+                    system_id="backup_service",
+                    resource_id=resource_id,
+                    data_category="BACKUP_ARCHIVE",
+                    required_action="RETAIN",
+                    observed_state="PRESENT",
+                    is_violation=False,
+                    evidence_id=evidence_id,
+                    verification_operation="VERIFY_RECORD_PRESENT",
+                )
+
+        # 3. Resolve required action with explicit unsupported handling
+        try:
+            action = self.get_required_action(data_category)
+        except ValueError:
+            logger.error(
+                "Unsupported data category '%s' for resource '%s'",
+                data_category,
+                resource_id,
+            )
             return RecordAssessment(
                 system_id=system_id,
                 resource_id=resource_id,
                 data_category=data_category,
-                required_action="DISABLE",
-                observed_state="ACTIVE",
+                required_action="UNSUPPORTED",
+                observed_state="PRESENT",
                 is_violation=True,
                 evidence_id=evidence_id,
-                violation_operation="REPORT_ACTIVE_DATA_FLOW",
-                remediation_operation="DISABLE_DATA_FLOW",
-                verification_operation="VERIFY_DATA_FLOW_DISABLED",
+                violation_operation="REPORT_REMAINING_RECORD",
+                remediation_operation="DELETE_RECORD",
+                verification_operation="VERIFY_RECORD_ABSENT",
             )
 
-        # Case 2: Restore risk
-        if is_restore_risk or (system_id == "backup_service" and observed_state == "ACTIVE"):
-            return RecordAssessment(
-                system_id=system_id,
-                resource_id=resource_id,
-                data_category=data_category,
-                required_action="BLOCK",
-                observed_state="ACTIVE",
-                is_violation=True,
-                evidence_id=evidence_id,
-                violation_operation="REPORT_RESTORE_RISK",
-                remediation_operation="BLOCK_RESTORE",
-                verification_operation="VERIFY_RESTORE_BLOCKED",
-            )
-
-        # Case 3: Action DELETE
+        # 4. Action DELETE
         if action == "DELETE":
             if observed_state == "PRESENT":
                 return RecordAssessment(
@@ -117,7 +177,7 @@ class PolicyEngine:
                     verification_operation="VERIFY_RECORD_ABSENT",
                 )
 
-        # Case 4: Action REDACT
+        # 5. Action REDACT (including ACCOUNT_TOMBSTONE and SUPPORT_MESSAGE)
         if action == "REDACT":
             if has_exposed_pii or observed_state == "PRESENT":
                 return RecordAssessment(
@@ -144,7 +204,7 @@ class PolicyEngine:
                     verification_operation="VERIFY_RECORD_REDACTED",
                 )
 
-        # Case 5: Action ANONYMIZE
+        # 6. Action ANONYMIZE
         if action == "ANONYMIZE":
             if has_exposed_pii or observed_state == "PRESENT":
                 return RecordAssessment(
@@ -171,7 +231,7 @@ class PolicyEngine:
                     verification_operation="VERIFY_RECORD_ANONYMIZED",
                 )
 
-        # Case 6: Action RETAIN
+        # 7. Action RETAIN (SECURITY_AUDIT_LOG, LEGAL_HOLD_RECORD)
         if action == "RETAIN":
             return RecordAssessment(
                 system_id=system_id,
