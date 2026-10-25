@@ -53,6 +53,30 @@ class TestIdentityResolver(unittest.TestCase):
         self.assertIsNotNone(bundle)
         self.assertNotIn("johnny@oldmail.com", bundle.emails)
 
+    def test_future_identity_snapshot_ignored(self):
+        cutoff = datetime(2026, 5, 15, 12, 0, tzinfo=timezone.utc)
+        bundle = self.resolver.build_identity_bundle("john.doe@newmail.com", cutoff)
+        self.assertIsNotNone(bundle)
+        # Snapshot updated on June 1 should not populate snapshot attributes before cutoff
+        self.assertEqual(len(bundle.names), 0)
+
+    def test_ambiguous_email_mapping_disambiguated(self):
+        users = [
+            UserIdentity("user_A", "Alice", "shared@domain.com", "+111", "hash_a", datetime(2026, 1, 1, tzinfo=timezone.utc)),
+            UserIdentity("user_B", "Bob", "shared@domain.com", "+222", "hash_b", datetime(2026, 5, 1, tzinfo=timezone.utc)),
+        ]
+        audits = [
+            UserAuditEntry("audit_a", "user_A", datetime(2026, 1, 2, tzinfo=timezone.utc), "email", "old_a@domain.com", "shared@domain.com"),
+            UserAuditEntry("audit_b", "user_B", datetime(2026, 4, 1, tzinfo=timezone.utc), "email", "old_b@domain.com", "shared@domain.com"),
+        ]
+        resolver = IdentityResolver(users, audits)
+        # Cutoff in March: user_A had the most recent event
+        uid_march = resolver.resolve_user_id("shared@domain.com", datetime(2026, 3, 1, tzinfo=timezone.utc))
+        self.assertEqual(uid_march, "user_A")
+        # Cutoff in May: user_B had the most recent event
+        uid_may = resolver.resolve_user_id("shared@domain.com", datetime(2026, 5, 15, tzinfo=timezone.utc))
+        self.assertEqual(uid_may, "user_B")
+
 
 if __name__ == "__main__":
     unittest.main()

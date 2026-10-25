@@ -1,6 +1,7 @@
 """Regression tests covering confirmed defects in case_03, case_12, case_16, case_20, and case_22."""
 
 import csv
+from datetime import datetime, timezone
 import json
 import unittest
 from pathlib import Path
@@ -17,6 +18,7 @@ from code.ingestion.csv_loader import (
 )
 from code.reasoning.decision_engine import DecisionEngine
 from code.reasoning.policy_engine import PolicyEngine
+from code.schemas import DeletionRequest
 
 
 class TestRegressionCases(unittest.TestCase):
@@ -95,6 +97,44 @@ class TestRegressionCases(unittest.TestCase):
         self.assertEqual(pred.deletion_status, "INCOMPLETE")
         pred_steps = [s.to_dict() for s in pred.steps]
         self.assertEqual(pred_steps, gt_steps)
+
+    def test_custom_case_01_historical_identity_drift(self):
+        """Custom Case 1: Historical email drift with stale read replica."""
+        custom_req = DeletionRequest(
+            case_id="custom_case_01",
+            email="elena.vasquez@gmail.com",
+            requested_at=datetime(2026, 9, 10, 10, 0, tzinfo=timezone.utc),
+            reported_status="COMPLETE",
+            reported_at=datetime(2026, 9, 12, 10, 0, tzinfo=timezone.utc),
+            audit_at=datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc),
+            request_text="Please permanently erase my personal account and all associated order history under GDPR article 17.",
+        )
+        pred = self.engine.evaluate_case(custom_req)
+        # Status should be evaluated properly based on evidence
+        self.assertIn(pred.deletion_status, ["COMPLETE", "INCOMPLETE"])
+
+    def test_custom_case_02_data_portability_intent(self):
+        """Custom Case 2: Non-deletion data portability request (Intent Discrimination)."""
+        custom_req = DeletionRequest(
+            case_id="custom_case_02",
+            email="portability.user@example.com",
+            requested_at=datetime(2026, 8, 1, 10, 0, tzinfo=timezone.utc),
+            reported_status="NOT_STARTED",
+            reported_at=datetime(2026, 8, 1, 10, 0, tzinfo=timezone.utc),
+            audit_at=datetime(2026, 8, 15, 12, 0, tzinfo=timezone.utc),
+            request_text="I am writing to request a copy of my personal data and recent invoices in CSV format. I am not asking for deletion and wish to continue using my account.",
+        )
+        pred = self.engine.evaluate_case(custom_req)
+        self.assertEqual(pred.deletion_status, "NOT_APPLICABLE")
+        self.assertEqual(pred.steps, [])
+
+    def test_custom_case_03_account_tombstone_exposed_pii(self):
+        """Custom Case 3: Account tombstone with exposed email hash."""
+        custom_req = self.requests["case_32"]
+        pred = self.engine.evaluate_case(custom_req)
+        self.assertEqual(pred.deletion_status, "INCOMPLETE")
+        finding_ops = [s.operation for s in pred.steps if s.phase == "FINDING"]
+        self.assertIn("REPORT_EXPOSED_PII", finding_ops)
 
 
 if __name__ == "__main__":
