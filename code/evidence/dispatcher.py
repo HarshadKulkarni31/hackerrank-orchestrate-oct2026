@@ -798,26 +798,6 @@ class EvidenceDispatcher:
             em_match = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", full_text)
             em_doc = em_match.group(0).lower() if em_match else None
 
-            # Statement and order export references (e.g. NST-2026-0718-1842 -> export_1842, ORD-20261260 -> export_1260)
-            for m_nst in re.finditer(r"NST-\d{4}-\d{4}-(\d+)", full_text):
-                rid = f"export_{m_nst.group(1)}"
-                self._add_record(
-                    EvidenceRecord(file_id, captured_at, "export_service", rid, "USER_EXPORT", u_doc, em_doc, None, "PRESENT", False)
-                )
-            for m_ord in re.finditer(r"ORD-\d{4}(\d+)", full_text):
-                rid = f"export_{m_ord.group(1)}"
-                self._add_record(
-                    EvidenceRecord(file_id, captured_at, "export_service", rid, "USER_EXPORT", u_doc, em_doc, None, "PRESENT", False)
-                )
-
-            # Disputed orders / legal retention records
-            for m_leg in re.finditer(r"ORD-(\d+)\s+\|\s+(user_\d+)\s+\|\s+([^|]+)", full_text):
-                rid = f"export_{m_leg.group(1)}"
-                u_leg = m_leg.group(2)
-                self._add_record(
-                    EvidenceRecord(file_id, captured_at, "export_service", rid, "LEGAL_HOLD_RECORD", u_leg, None, None, "PRESENT", False)
-                )
-
             # Standard resource IDs
             for m_rid in re.finditer(r"\b(support_\d+|export_\d+|audit_record_\d+|account_\d+)\b", full_text):
                 rid = m_rid.group(1)
