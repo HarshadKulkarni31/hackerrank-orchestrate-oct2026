@@ -2,8 +2,9 @@
 
 import csv
 import json
+from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional, Set
 
 from code.config import (
     ALLOWED_PHASES,
@@ -18,15 +19,76 @@ class ValidationError(Exception):
 
 
 def validate_output_csv(
-    csv_path: Path, expected_case_ids: List[str]
+    csv_path: Path,
+    expected_case_ids: List[str],
+    dataset_dir: Optional[Path] = None,
 ) -> Tuple[bool, List[str]]:
     """Validates the generated output CSV file against all challenge constraints.
+    Verifies schemas, allowed operations, phases, evidence grounding, temporal cutoff,
+    subsystem operation constraints, and decision consistency.
     Returns (is_valid, list_of_error_messages).
     """
     errors = []
     if not csv_path.exists():
         return False, [f"Output file does not exist: {csv_path}"]
 
+    if dataset_dir is None:
+        dataset_dir = Path("dataset")
+
+    # 1. Load Ground Truth Evidence Metadata for Grounding & Temporal Checks
+    valid_evidence_ids: Set[str] = set()
+    evidence_timestamps: Dict[str, datetime] = {}
+    case_audit_times: Dict[str, datetime] = {}
+
+    ev_files_csv = dataset_dir / "evidence_files.csv"
+    if ev_files_csv.exists():
+        with open(ev_files_csv, mode="r", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                fid = r["file_id"]
+                valid_evidence_ids.add(fid)
+                if r.get("captured_at"):
+                    try:
+                        evidence_timestamps[fid] = datetime.fromisoformat(
+                            r["captured_at"].replace("Z", "+00:00")
+                        )
+                    except Exception:
+                        pass
+
+    act_csv = dataset_dir / "system_activity.csv"
+    if act_csv.exists():
+        with open(act_csv, mode="r", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                aid = r["activity_id"]
+                valid_evidence_ids.add(aid)
+                if r.get("event_time"):
+                    try:
+                        evidence_timestamps[aid] = datetime.fromisoformat(
+                            r["event_time"].replace("Z", "+00:00")
+                        )
+                    except Exception:
+                        pass
+
+    audit_csv = dataset_dir / "user_audit_log.csv"
+    if audit_csv.exists():
+        with open(audit_csv, mode="r", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                valid_evidence_ids.add(r["audit_id"])
+
+    # Load case audit cutoff timestamps
+    for req_filename in ("deletion_requests.csv", "sample_deletion_requests.csv"):
+        req_csv = dataset_dir / req_filename
+        if req_csv.exists():
+            with open(req_csv, mode="r", encoding="utf-8") as f:
+                for r in csv.DictReader(f):
+                    if r.get("case_id") and r.get("audit_at"):
+                        try:
+                            case_audit_times[r["case_id"]] = datetime.fromisoformat(
+                                r["audit_at"].replace("Z", "+00:00")
+                            )
+                        except Exception:
+                            pass
+
+    # 2. Read and Validate Output CSV Structure
     with open(csv_path, mode="r", encoding="utf-8") as f:
         reader = csv.reader(f)
         header = next(reader, None)
@@ -74,6 +136,16 @@ def validate_output_csv(
                 )
             continue
 
+        # Consistency checks for COMPLETE / INCOMPLETE
+        if status == "COMPLETE" and len(steps) == 0:
+            errors.append(
+                f"Line {line_no} ({case_id}): COMPLETE case must contain at least one verification step"
+            )
+        elif status == "INCOMPLETE" and not any(isinstance(s, dict) and s.get("phase") == "FINDING" for s in steps):
+            errors.append(
+                f"Line {line_no} ({case_id}): INCOMPLETE case must contain at least one FINDING step"
+            )
+
         # For COMPLETE or INCOMPLETE
         phase_sequence = []
         for step_idx, step in enumerate(steps):
@@ -105,6 +177,7 @@ def validate_output_csv(
                 )
 
             phase = step.get("phase")
+            system_id = step.get("system_id")
             operation = step.get("operation")
             state = step.get("state")
             evidence_id = step.get("evidence_id", "")
@@ -130,6 +203,32 @@ def validate_output_csv(
                 errors.append(
                     f"Line {line_no} ({case_id}) step {expected_step_no}: unknown operation '{operation}'"
                 )
+
+            # Subsystem Specific Modeling Checks
+            if system_id == "integration_service":
+                if operation == "VERIFY_RECORD_ABSENT":
+                    errors.append(
+                        f"Line {line_no} ({case_id}) step {expected_step_no}: integration_service cannot use VERIFY_RECORD_ABSENT, must use VERIFY_DATA_FLOW_DISABLED"
+                    )
+            elif system_id == "backup_service":
+                if operation == "VERIFY_RECORD_ABSENT":
+                    errors.append(
+                        f"Line {line_no} ({case_id}) step {expected_step_no}: backup_service cannot use VERIFY_RECORD_ABSENT, must use VERIFY_RESTORE_BLOCKED or VERIFY_RECORD_PRESENT"
+                    )
+
+            # Evidence Grounding & Temporal Checks
+            if evidence_id:
+                if valid_evidence_ids and evidence_id not in valid_evidence_ids:
+                    errors.append(
+                        f"Line {line_no} ({case_id}) step {expected_step_no}: cited evidence_id '{evidence_id}' does not exist in participant evidence files, activities, or audit logs"
+                    )
+                if case_id in case_audit_times and evidence_id in evidence_timestamps:
+                    audit_cutoff = case_audit_times[case_id]
+                    ev_captured_at = evidence_timestamps[evidence_id]
+                    if ev_captured_at > audit_cutoff:
+                        errors.append(
+                            f"Line {line_no} ({case_id}) step {expected_step_no}: cited evidence '{evidence_id}' captured at {ev_captured_at.isoformat()} is AFTER case audit_at {audit_cutoff.isoformat()}"
+                        )
 
             if status == "COMPLETE":
                 if phase != "VERIFICATION":

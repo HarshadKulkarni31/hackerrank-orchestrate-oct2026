@@ -101,36 +101,27 @@ class DecisionEngine:
                 acc_id = r.resource_id
                 break
 
-        if not acc_id and user_id and user_id.startswith("user_"):
-            try:
-                unum = int(user_id.split("_")[1])
-                if unum <= 10:
-                    acc_id = f"account_{str(unum).zfill(3)}"
-            except Exception:
-                pass
-
         if not acc_id:
-            w_start = request.requested_at - timedelta(hours=1)
+            w_start = request.requested_at - timedelta(hours=2)
             w_end = request.reported_at + timedelta(hours=2)
             expected_res = STATUS_TO_RESULT.get(request.reported_status)
             w_cands = [a for a in self.primary_worker_acts if w_start <= a.event_time <= w_end]
 
-            # Filter by matching reported_result
-            matching_result_cands = [a for a in w_cands if a.reported_result == expected_res]
-            cand_pool = matching_result_cands if matching_result_cands else w_cands
-
-            best_cand = None
-            for a in cand_pool:
-                a_ev = self.dispatcher.find_records_by_resource_id(a.resource_id, request.audit_at)
-                if any(r.user_id == user_id or (r.email and r.email.lower() in emails) for r in a_ev):
-                    best_cand = a.resource_id
+            # First match worker activity directly mentioning subject
+            for a in w_cands:
+                if (user_id and user_id in a.details) or any(e in a.details.lower() for e in emails):
+                    acc_id = a.resource_id
                     break
 
-            if best_cand:
-                acc_id = best_cand
-            elif cand_pool:
-                cand_pool.sort(key=lambda a: abs((a.event_time - request.reported_at).total_seconds()))
-                acc_id = cand_pool[0].resource_id
+            # Next check evidence records of candidate pool matching reported_result
+            if not acc_id:
+                matching_result_cands = [a for a in w_cands if a.reported_result == expected_res]
+                cand_pool = matching_result_cands if matching_result_cands else w_cands
+                for a in cand_pool:
+                    a_ev = self.dispatcher.find_records_by_resource_id(a.resource_id, request.audit_at)
+                    if any(r.user_id == user_id or (r.email and r.email.lower() in emails) for r in a_ev):
+                        acc_id = a.resource_id
+                        break
 
         if acc_id:
             cand_resources.add(acc_id)
@@ -203,7 +194,11 @@ class DecisionEngine:
 
                 if sys_id == "account_service":
                     rep_ev = self.dispatcher.find_records_by_resource_id(rid, request.audit_at)
-                    ev_ref = rep_ev[0].evidence_id if rep_ev else "evidence_54"
+                    ev_ref = rep_ev[0].evidence_id if rep_ev else ""
+                    if not ev_ref:
+                        ev_ref = activity_evidence_map.get(rid, "")
+                    if not ev_ref:
+                        continue
                     ass = self.policy.assess_record(sys_id, rid, cat, "ABSENT", ev_ref, False)
                     assessments.append(ass)
                 elif sys_id == "security_service":

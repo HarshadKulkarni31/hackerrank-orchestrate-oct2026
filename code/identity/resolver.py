@@ -2,10 +2,21 @@
 
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Union
 from code.schemas import UserIdentity, UserAuditEntry, IdentityBundle
 
 logger = logging.getLogger("ghost_data_audit.identity")
+
+
+def _parse_dt(dt: Union[datetime, str, None]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if isinstance(dt, datetime):
+        return dt
+    try:
+        return datetime.fromisoformat(dt.replace("Z", "+00:00"))
+    except Exception:
+        return None
 
 
 class IdentityResolver:
@@ -22,22 +33,23 @@ class IdentityResolver:
             self.audit_by_user.setdefault(entry.user_id, []).append(entry)
 
     def resolve_user_id(
-        self, email: str, audit_at: Optional[datetime] = None
+        self, email: str, audit_at: Optional[Union[datetime, str]] = None
     ) -> Optional[str]:
         """Resolves an email address to a user_id strictly respecting audit_at cutoff.
         Detects duplicate or ambiguous email mappings across users."""
+        audit_dt = _parse_dt(audit_at)
         norm_email = email.strip().lower()
         candidate_users: Set[str] = set()
 
         # 1. Check current identity snapshots that were updated at or before audit_at
         for u in self.identities:
             if u.email.strip().lower() == norm_email:
-                if audit_at is None or u.updated_at <= audit_at:
+                if audit_dt is None or u.updated_at <= audit_dt:
                     candidate_users.add(u.user_id)
 
         # 2. Check audit log entries at or before audit_at
         for entry in self.audit_entries:
-            if audit_at is not None and entry.event_time > audit_at:
+            if audit_dt is not None and entry.event_time > audit_dt:
                 continue
             if entry.field_name == "email":
                 if entry.old_value and entry.old_value.strip().lower() == norm_email:
@@ -50,7 +62,7 @@ class IdentityResolver:
             logger.warning(
                 "Ambiguous email mapping detected for '%s' at cutoff %s: %s",
                 norm_email,
-                audit_at,
+                audit_dt,
                 candidate_users,
             )
             # Disambiguate by selecting candidate with most recent event before audit_at
@@ -59,7 +71,7 @@ class IdentityResolver:
             for uid in candidate_users:
                 u_entries = [
                     e for e in self.audit_by_user.get(uid, [])
-                    if audit_at is None or e.event_time <= audit_at
+                    if audit_dt is None or e.event_time <= audit_dt
                 ]
                 if u_entries:
                     u_entries.sort(key=lambda e: e.event_time, reverse=True)
@@ -84,11 +96,12 @@ class IdentityResolver:
         return None
 
     def build_identity_bundle(
-        self, email: str, audit_at: datetime
+        self, email: str, audit_at: Union[datetime, str]
     ) -> Optional[IdentityBundle]:
         """Constructs an IdentityBundle containing all verified identifiers up to audit_at."""
+        audit_dt = _parse_dt(audit_at)
         norm_email = email.strip().lower()
-        user_id = self.resolve_user_id(norm_email, audit_at)
+        user_id = self.resolve_user_id(norm_email, audit_dt)
         if not user_id:
             return None
 
@@ -98,7 +111,7 @@ class IdentityResolver:
 
         # Add identity snapshot only if updated at or before audit_at
         current = self.identities_by_id.get(user_id)
-        if current and current.updated_at <= audit_at:
+        if current and (audit_dt is None or current.updated_at <= audit_dt):
             if current.email:
                 bundle.emails.add(current.email.strip().lower())
             if current.name:
@@ -111,7 +124,7 @@ class IdentityResolver:
         # Add historical entries at or before audit_at
         user_audits = self.audit_by_user.get(user_id, [])
         for entry in user_audits:
-            if entry.event_time <= audit_at:
+            if audit_dt is None or entry.event_time <= audit_dt:
                 if entry.field_name == "email":
                     if entry.old_value:
                         bundle.emails.add(entry.old_value.strip().lower())

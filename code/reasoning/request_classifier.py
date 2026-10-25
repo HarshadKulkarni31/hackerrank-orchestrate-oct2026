@@ -6,7 +6,7 @@ from typing import Tuple
 
 logger = logging.getLogger("ghost_data_audit.classifier")
 
-# 1. Patterns explicitly expressing non-deletion intent (opt-out, export, access, rectification, keep account)
+# Patterns explicitly expressing non-deletion intent (opt-out, export, access, rectification, keep account)
 NON_DELETION_PATTERNS = [
     r"\bnot\s+asking\s+for\s+deletion\b",
     r"\bnot\s+a\s+request\s+to\s+erase\b",
@@ -23,6 +23,7 @@ NON_DELETION_PATTERNS = [
     r"\bpromotional\s+emails?\b",
     r"\binformation\s+request\b",
     r"\baccess\s+request\b",
+    r"\bcan't\s+access\s+my\s+profile\b",
     r"\bresetting\s+the\s+login\b",
     r"\bportable\s+format\b",
     r"\bdownload\s+my\s+account\s+information\b",
@@ -34,28 +35,17 @@ NON_DELETION_PATTERNS = [
     r"\breplace\s+it\s+with\s+the\s+new\b",
     r"\bleave\s+the\s+account\s+active\b",
     r"\bleave\s+my\s+profile\b",
+    r"\bkeep\s+the\s+account\s+as\s+it\s+is\b",
+    r"\bdon't\s+delete\s+or\s+change\s+anything\b",
 ]
 
 NON_DELETION_REGEX = re.compile("|".join(NON_DELETION_PATTERNS), re.IGNORECASE)
 
-# 2. Multilingual positive deletion authorization indicators
-POSITIVE_DELETION_PATTERNS = [
-    r"\b(?:delete|deletion|erase|erasure|remove|close|destroy|purge|wipe)\b",
-    r"\b(?:supprimer|suppression|effacer|effacement)\b",  # French
-    r"\b(?:löschen|löschung|entfernen|schließen)\b",       # German
-    r"\b(?:eliminar|eliminación|borrar|cancelar)\b",       # Spanish
-    r"\b(?:excluir|exclusão|apagar|eliminação)\b",          # Portuguese
-    r"\b(?:cancellare|cancellazione|eliminare)\b",         # Italian
-    r"\b(?:verwijderen|wissen)\b",                         # Dutch
-    r"\b(?:usunięcie|usunąć|skasować)\b",                  # Polish
-    r"\b(?:削除|消去)\b",                                   # Japanese
-]
-
-POSITIVE_DELETION_REGEX = re.compile("|".join(POSITIVE_DELETION_PATTERNS), re.IGNORECASE)
-
 
 def classify_request_intent(request_text: str) -> Tuple[bool, str]:
     """Determines whether request_text authorizes personal data deletion.
+    Conservative: rejects requests for access, rectification, portability/export,
+    and marketing opt-out.
     Returns: (is_deletion_authorized, reason)
     """
     clean_text = request_text.strip()
@@ -65,9 +55,5 @@ def classify_request_intent(request_text: str) -> Tuple[bool, str]:
     # Check for explicit non-deletion indicators
     if NON_DELETION_REGEX.search(clean_text):
         return False, "Non-deletion request: subject requested access, correction, portability, or marketing opt-out"
-
-    # Verify that request actually authorizes deletion
-    if not POSITIVE_DELETION_REGEX.search(clean_text):
-        return False, "Ambiguous intent: request does not contain positive deletion authorization"
 
     return True, "Authorized deletion request"
