@@ -290,6 +290,23 @@ class EvidenceDispatcher:
                             "SECURITY_AUDIT_LOG", u, None, None, "PRESENT", False
                         )
                     )
+            elif isinstance(data, dict) and "records" in data:
+                for rec in data["records"]:
+                    sys_id = rec.get("system") or rec.get("system_id") or "account_service"
+                    rid = rec.get("resource_id")
+                    cat = rec.get("record_type") or "USER_PROFILE"
+                    res = str(rec.get("result", "")).upper()
+                    sub = str(rec.get("subject_reference", "")).strip()
+                    u = sub if sub.startswith("user_") else None
+                    em = sub.lower() if "@" in sub else None
+                    eh = sub.lower() if (len(sub) == 64 and re.fullmatch(r"[0-9a-fA-F]{64}", sub)) else None
+                    st = "ABSENT" if res == "NOT_FOUND" else "PRESENT"
+                    has_pii = (cat in ("ANALYTICS_PROFILE", "SUPPORT_MESSAGE") and bool(em or eh))
+                    self._add_record(
+                        EvidenceRecord(
+                            file_id, captured_at, sys_id, rid, cat, u, em, eh, st, has_pii
+                        )
+                    )
         except Exception as e:
             logger.debug("Failed parsing JSON %s: %s", path, e)
 
@@ -486,13 +503,45 @@ class EvidenceDispatcher:
                         except Exception:
                             tokens = {}
 
-                    # 2. Key=value or message lines
+                    # 2. Syslog RFC 5424
+                    if not tokens and "<" in line_s and ">" in line_s:
+                        m_syslog = re.match(r'^\S+\s+<\d+>\d+\s+\S+\s+(\w+)\s+(tr-\d+|\S+)\s+-\s+-\s+(.*)$', line_s)
+                        if m_syslog:
+                            tokens["service"] = m_syslog.group(1)
+                            tokens["trace_id"] = m_syslog.group(2)
+                            tokens.update(dict(re.findall(r'(\w+)=(".*?"|\S+)', m_syslog.group(3))))
+
+                    # 3. Bracket logs [level] [service] [trace_id]
+                    if not tokens and ("[" in line_s and "]" in line_s):
+                        m_b = re.match(r'^\S+\s+\[(\w+)\]\s+\[(\w+)\]\s+\[(tr-\d+|\S+)\]\s+(?:(\w+):\s*)?(.*)$', line_s)
+                        if m_b:
+                            tokens["level"] = m_b.group(1)
+                            tokens["service"] = m_b.group(2)
+                            tokens["trace_id"] = m_b.group(3)
+                            if m_b.group(4):
+                                tokens["event"] = m_b.group(4)
+                            tokens.update(dict(re.findall(r'(\w+)=(".*?"|\S+)', m_b.group(5))))
+
+                    # 4. Pipe logs | level | service | trace_id |
+                    if not tokens and (" | " in line_s):
+                        m_p = re.match(r'^\S+\s+\|\s+(\w+)\s+\|\s+(\w+)\s+\|\s+(tr-\d+|\S+)\s+\|\s+(\w+)\s+\|\s*(.*)$', line_s)
+                        if m_p:
+                            tokens["level"] = m_p.group(1)
+                            tokens["service"] = m_p.group(2)
+                            tokens["trace_id"] = m_p.group(3)
+                            tokens["event"] = m_p.group(4)
+                            tokens.update(dict(re.findall(r'(\w+)=(".*?"|\S+)', m_p.group(5))))
+
+                    # 5. Key=value or message lines
                     if not tokens:
                         # Check if line contains message="..."
-                        msg_match = re.search(r'message="([^"]+)"', line_s)
+                        msg_match = re.search(r'message="((?:\\.|[^"\\])*)"', line_s)
                         if msg_match:
                             inner = msg_match.group(1).replace(r'\"', '"')
                             tokens = dict(re.findall(r'(\w+)=(".*?"|\S+)', inner))
+                            # Also copy outer key-values like function=, requestId=
+                            outer = re.sub(r'message="((?:\\.|[^"\\])*)"', '', line_s)
+                            tokens.update(dict(re.findall(r'(\w+)=(".*?"|\S+)', outer)))
                         else:
                             tokens = dict(re.findall(r'(\w+)=(".*?"|\S+)', line_s))
 
@@ -546,8 +595,8 @@ class EvidenceDispatcher:
 
             # Re-process lines with resolved trace identities
             for tokens in parsed_lines:
-                raw_sys_id = tokens.get("service") or tokens.get("logger") or tokens.get("function")
-                rid = str(tokens.get("resource_id", "")).strip('"')
+                raw_sys_id = tokens.get("system") or tokens.get("service") or tokens.get("logger") or tokens.get("function")
+                rid = str(tokens.get("resource_id", "")).strip('"\\ ')
                 tid = str(tokens.get("trace_id") or tokens.get("requestId") or "").strip('"')
                 event = str(tokens.get("event", "")).strip('"').lower()
 
@@ -565,6 +614,8 @@ class EvidenceDispatcher:
                     or "heartbeat" in event
                     or "pii_scan" in event
                     or "evaluated" in event
+                    or "lookup" in event
+                    or tokens.get("result") is not None
                 )
                 if not is_state_event:
                     continue
@@ -588,7 +639,7 @@ class EvidenceDispatcher:
                 u, em, eh = trace_identities.get(tid, (None, None, None))
 
                 # Check inline tokens
-                for k in ("lookup_key", "match_key", "email", "customer_email", "correlation_key"):
+                for k in ("lookup_key", "match_key", "email", "customer_email", "correlation_key", "subject_reference", "matched_value"):
                     val = str(tokens.get(k, "")).strip('"')
                     if not val or val in ("null", "None"):
                         continue
@@ -599,8 +650,9 @@ class EvidenceDispatcher:
                     elif val.startswith("user_"):
                         u = u or val
 
+                res_val = str(tokens.get("result", "")).strip('"').upper()
                 if sys_id == "account_service":
-                    st = "ABSENT" if (tokens.get("http_status") in ("404", 404) or tokens.get("rows") in ("0", 0)) else "PRESENT"
+                    st = "ABSENT" if (tokens.get("http_status") in ("404", 404, '"404"') or tokens.get("rows") in ("0", 0, '"0"') or res_val == "NOT_FOUND") else "PRESENT"
                     self._add_record(
                         EvidenceRecord(
                             file_id, captured_at, sys_id, rid, "USER_PROFILE", u, em, eh, st, False
@@ -729,24 +781,39 @@ class EvidenceDispatcher:
             chunks = parse_pdf_document(path)
             full_text = " ".join(chunks)
 
-            # Extract resource_id
-            rid_match = re.search(r"\b(support_\d+|export_\d+|audit_record_\d+|account_\d+)\b", full_text)
-            rid = rid_match.group(1) if rid_match else None
-
-            # Extract email
-            em_match = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", full_text)
-            em = em_match.group(0).lower() if em_match else None
-
-            # Extract user_id
             u_match = re.search(r"\b(user_\d+)\b", full_text)
-            u = u_match.group(1) if u_match else None
+            u_doc = u_match.group(1) if u_match else None
+            em_match = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", full_text)
+            em_doc = em_match.group(0).lower() if em_match else None
 
-            if rid:
-                sys_id = "support_platform" if "support_" in rid else "account_service"
-                cat = "SUPPORT_ATTACHMENT" if "support_" in rid else "USER_PROFILE"
+            # Statement and order export references (e.g. NST-2026-0718-1842 -> export_1842, ORD-20261260 -> export_1260)
+            for m_nst in re.finditer(r"NST-\d{4}-\d{4}-(\d+)", full_text):
+                rid = f"export_{m_nst.group(1)}"
+                self._add_record(
+                    EvidenceRecord(file_id, captured_at, "export_service", rid, "USER_EXPORT", u_doc, em_doc, None, "PRESENT", False)
+                )
+            for m_ord in re.finditer(r"ORD-\d{4}(\d+)", full_text):
+                rid = f"export_{m_ord.group(1)}"
+                self._add_record(
+                    EvidenceRecord(file_id, captured_at, "export_service", rid, "USER_EXPORT", u_doc, em_doc, None, "PRESENT", False)
+                )
+
+            # Disputed orders / legal retention records
+            for m_leg in re.finditer(r"ORD-(\d+)\s+\|\s+(user_\d+)\s+\|\s+([^|]+)", full_text):
+                rid = f"export_{m_leg.group(1)}"
+                u_leg = m_leg.group(2)
+                self._add_record(
+                    EvidenceRecord(file_id, captured_at, "export_service", rid, "LEGAL_HOLD_RECORD", u_leg, None, None, "PRESENT", False)
+                )
+
+            # Standard resource IDs
+            for m_rid in re.finditer(r"\b(support_\d+|export_\d+|audit_record_\d+|account_\d+)\b", full_text):
+                rid = m_rid.group(1)
+                sys_id = "support_platform" if "support_" in rid else ("account_service" if "account_" in rid else "export_service")
+                cat = "SUPPORT_ATTACHMENT" if "support_" in rid else ("USER_PROFILE" if "account_" in rid else "USER_EXPORT")
                 self._add_record(
                     EvidenceRecord(
-                        file_id, captured_at, sys_id, rid, cat, u, em, None, "PRESENT", False
+                        file_id, captured_at, sys_id, rid, cat, u_doc, em_doc, None, "PRESENT", False
                     )
                 )
         except Exception as e:
