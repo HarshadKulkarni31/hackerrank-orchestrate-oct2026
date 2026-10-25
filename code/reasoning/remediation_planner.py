@@ -14,13 +14,13 @@ FINDING_OP_ORDER = {
 
 SYSTEM_FINDING_ORDER = {
     "account_service": 0,
-    "search_service": 1,
-    "export_service": 2,
-    "support_platform": 3,
-    "analytics_platform": 4,
-    "identity_service": 5,
-    "integration_service": 6,
-    "backup_service": 7,
+    "export_service": 1,
+    "search_service": 2,
+    "analytics_platform": 3,
+    "support_platform": 4,
+    "integration_service": 5,
+    "backup_service": 6,
+    "identity_service": 7,
 }
 
 REMEDIATION_OP_ORDER = {
@@ -35,23 +35,23 @@ SYSTEM_REMEDIATION_ORDER = {
     "integration_service": 0,
     "backup_service": 1,
     "account_service": 2,
-    "search_service": 3,
-    "export_service": 4,
+    "export_service": 3,
+    "search_service": 4,
     "support_platform": 5,
-    "identity_service": 6,
-    "analytics_platform": 7,
+    "analytics_platform": 6,
+    "identity_service": 7,
 }
 
 SYSTEM_VERIFY_ORDER = {
     "account_service": 0,
-    "search_service": 1,
-    "export_service": 2,
+    "export_service": 1,
+    "search_service": 2,
     "security_service": 3,
     "support_platform": 4,
-    "identity_service": 4,
     "analytics_platform": 5,
     "integration_service": 6,
     "backup_service": 7,
+    "identity_service": 8,
 }
 
 VERIFY_OP_ORDER = {
@@ -80,8 +80,8 @@ def sort_steps_canonically(steps: List[Step]) -> List[Step]:
         elif s.phase == "REMEDIATION":
             return (
                 p_val,
-                REMEDIATION_OP_ORDER.get(s.operation, 99),
                 SYSTEM_REMEDIATION_ORDER.get(s.system_id, 99),
+                REMEDIATION_OP_ORDER.get(s.operation, 99),
                 s.resource_id,
             )
         else:

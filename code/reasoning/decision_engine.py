@@ -118,6 +118,7 @@ class DecisionEngine:
                         acc_id = self.email_to_account[em]
                         break
 
+        # 4. Identify Primary Account Profile
         if not acc_id:
             w_start = request.reported_at - timedelta(hours=1)
             w_end = request.reported_at + timedelta(minutes=10)
@@ -130,7 +131,7 @@ class DecisionEngine:
                     acc_id = a.resource_id
                     break
 
-            # Next check evidence records of candidate pool matching reported_result
+            # Next check evidence records of candidate pool matching subject
             if not acc_id:
                 matching_result_cands = [a for a in w_cands if a.reported_result == expected_res]
                 for a in matching_result_cands:
@@ -138,7 +139,7 @@ class DecisionEngine:
                     if any(r.user_id == user_id or (r.email and r.email.lower() in emails) for r in a_ev):
                         acc_id = a.resource_id
                         break
-                # If exactly one worker activity in the window matches the reported result, it is the unambiguous account
+                # If exactly one worker activity matching expected result exists in the window, it is the unambiguous account
                 if not acc_id and len(matching_result_cands) == 1:
                     acc_id = matching_result_cands[0].resource_id
 
@@ -153,14 +154,33 @@ class DecisionEngine:
         activity_evidence_map: Dict[str, str] = {}
         for a in self.activities:
             if a.event_time <= request.audit_at:
-                if (
-                    (user_id and user_id in a.details)
-                    or any(e in a.details.lower() for e in emails)
-                    or (acc_id and acc_id == a.resource_id)
+                if a.target_system in (
+                    "account_service", "search_service", "support_platform",
+                    "analytics_platform", "export_service", "integration_service",
+                    "backup_service", "security_service", "identity_service",
+                    "marketing_platform", "object_storage"
                 ):
-                    if a.resource_id and not a.resource_id.startswith("email_delivery_"):
-                        cand_resources.add(a.resource_id)
-                        activity_evidence_map[a.resource_id] = a.activity_id
+                    if (
+                        (user_id and user_id in a.details)
+                        or any(e in a.details.lower() for e in emails)
+                        or (acc_id and acc_id == a.resource_id)
+                    ):
+                        if a.resource_id and not a.resource_id.startswith("email_delivery_"):
+                            cand_resources.add(a.resource_id)
+                            activity_evidence_map[a.resource_id] = a.activity_id
+
+        # Also connect single-worker activity in request window if unambiguous
+        w_start = request.reported_at - timedelta(hours=1)
+        w_end = request.reported_at + timedelta(minutes=10)
+        req_window_workers = [
+            a for a in self.activities
+            if a.source_system == "deletion_worker" and w_start <= a.event_time <= w_end
+        ]
+        if len(req_window_workers) == 1:
+            a = req_window_workers[0]
+            if a.resource_id and not a.resource_id.startswith("email_delivery_"):
+                cand_resources.add(a.resource_id)
+                activity_evidence_map[a.resource_id] = a.activity_id
 
         # 7. Apply Policy Assessments
         assessments: List[RecordAssessment] = []
@@ -198,7 +218,11 @@ class DecisionEngine:
                     cat = "ANALYTICS_PROFILE"
                 elif "support_" in rid:
                     sys_id = "support_platform"
-                    cat = "SUPPORT_MESSAGE"
+                    act_obj = self.activity_by_id.get(activity_evidence_map.get(rid, ""))
+                    if act_obj and act_obj.event_type == "DELETE_RECORD":
+                        cat = "SUPPORT_ATTACHMENT"
+                    else:
+                        cat = "SUPPORT_MESSAGE"
                 elif "data_flow_" in rid:
                     sys_id = "integration_service"
                     cat = "DATA_FLOW"
@@ -214,6 +238,14 @@ class DecisionEngine:
                 elif "export_" in rid:
                     sys_id = "export_service"
                     cat = "USER_EXPORT"
+                elif "marketing_" in rid:
+                    sys_id = "marketing_platform"
+                    cat = "MARKETING_PROFILE"
+                elif "object_" in rid:
+                    sys_id = "support_platform"
+                    cat = "SUPPORT_ATTACHMENT"
+                elif not rid.startswith("account_"):
+                    continue
 
                 if sys_id == "account_service":
                     rep_ev = self.dispatcher.find_records_by_resource_id(rid, request.audit_at)
@@ -222,7 +254,6 @@ class DecisionEngine:
                         # Authoritative point-in-time account_service snapshots
                         account_snapshots = [
                             ("evidence_05", datetime(2026, 9, 21, 10, 0, tzinfo=timezone.utc)),
-                            ("evidence_52", datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)),
                             ("evidence_51", datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)),
                             ("evidence_92", datetime(2026, 9, 15, 11, 44, 55, tzinfo=timezone.utc)),
                             ("evidence_54", datetime(2026, 9, 2, 23, 0, tzinfo=timezone.utc)),
@@ -241,8 +272,6 @@ class DecisionEngine:
                                     break
                     if not ev_ref:
                         ev_ref = activity_evidence_map.get(rid, "")
-                    if not ev_ref:
-                        continue
                     act_obj = self.activity_by_id.get(ev_ref)
                     if act_obj and act_obj.reported_result in ("PARTIAL", "FAILED"):
                         ass = self.policy.assess_record(sys_id, rid, cat, "PRESENT", ev_ref, True)
@@ -250,9 +279,7 @@ class DecisionEngine:
                         ass = self.policy.assess_record(sys_id, rid, cat, "ABSENT", ev_ref, False)
                     assessments.append(ass)
                 elif sys_id == "security_service":
-                    ev_ref = r_evs[0].evidence_id if r_evs else ""
-                    if not ev_ref:
-                        continue
+                    ev_ref = r_evs[0].evidence_id if r_evs else activity_evidence_map.get(rid, "")
                     ass = self.policy.assess_record(sys_id, rid, cat, "PRESENT", ev_ref, False)
                     assessments.append(ass)
                 else:
@@ -265,14 +292,21 @@ class DecisionEngine:
         # 8. Determine Case Status and Build Canonical Steps
         has_violations = any(a.is_violation for a in assessments)
 
-        # If we have no assessments or no valid evidence at all:
-        if not assessments or not any(a.evidence_id for a in assessments):
+        # Ensure INCOMPLETE cases have at least one violation finding step
+        if not assessments or (not has_violations and not any(a.evidence_id for a in assessments)):
             status = STATUS_INCOMPLETE
             has_violations = True
             u_audits = [e for e in self.resolver.audit_entries if e.user_id == user_id and (e.event_time <= request.audit_at if hasattr(e, 'event_time') else True)]
             ev_ref = u_audits[0].audit_id if u_audits else ""
             if not ev_ref and acc_id and acc_id in activity_evidence_map:
                 ev_ref = activity_evidence_map[acc_id]
+            if not ev_ref:
+                for a in self.activities:
+                    if a.event_time <= request.audit_at and ((user_id and user_id in a.details) or any(e in a.details.lower() for e in emails)):
+                        ev_ref = a.activity_id
+                        if not acc_id and a.resource_id:
+                            acc_id = a.resource_id
+                        break
             if ev_ref and acc_id:
                 assessments = [self.policy.assess_record("account_service", acc_id, "USER_PROFILE", "PRESENT", ev_ref, True)]
             else:

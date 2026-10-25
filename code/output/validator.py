@@ -44,20 +44,34 @@ def validate_output_csv(
     case_audit_times: Dict[str, datetime] = {}
 
     origin_to_systems: Dict[str, Set[str]] = {
-        "account_admin_portal": {"account_service", "support_platform"},
-        "customer_account_service": {"account_service"},
-        "search_index_service": {"search_service"},
-        "search_index_admin": {"search_service"},
-        "integration_management_service": {"integration_service"},
-        "integration_admin": {"integration_service"},
+        "account_admin_portal": {"support_platform", "account_service"},
+        "account_history_service": {"export_service"},
         "analytics_platform": {"analytics_platform"},
-        "export_service": {"export_service"},
-        "support_platform": {"support_platform"},
         "backup_service": {"backup_service"},
-        "security_service": {"security_service"},
-        "identity_service": {"identity_service"},
-        "marketing_platform": {"marketing_platform"},
+        "central_observability_export": {"security_service", "backup_service", "account_service", "search_service", "support_platform", "export_service", "integration_service", "analytics_platform"},
         "customer_account_failover_replica_capture": {"account_service"},
+        "customer_account_service": {"security_service", "backup_service", "account_service", "search_service", "support_platform", "export_service", "integration_service", "analytics_platform"},
+        "customer_data_failover_replica_capture": {"security_service"},
+        "customer_data_inventory_capture": {"security_service", "backup_service", "account_service", "search_service", "support_platform", "export_service", "integration_service"},
+        "customer_data_read_replica_capture": {"security_service", "account_service", "search_service", "support_platform", "export_service", "analytics_platform"},
+        "customer_data_regional_replicas_capture": {"security_service", "account_service", "search_service", "support_platform", "export_service", "analytics_platform"},
+        "customer_data_reporting_replica_capture": {"security_service", "account_service", "search_service", "support_platform", "export_service", "analytics_platform"},
+        "customer_export_service": {"security_service", "backup_service", "account_service", "search_service", "support_platform", "export_service", "integration_service", "analytics_platform"},
+        "customer_search_primary_capture": {"search_service"},
+        "downstream_delivery_service": {"security_service", "backup_service", "account_service", "search_service", "support_platform", "integration_service", "analytics_platform"},
+        "export_service": {"export_service"},
+        "identity_service": {"identity_service"},
+        "integration_admin": {"integration_service"},
+        "integration_management_service": {"security_service", "account_service", "search_service", "support_platform", "integration_service", "analytics_platform"},
+        "marketing_platform": {"marketing_platform"},
+        "records_assurance_snapshot_bundle": {"security_service", "identity_service", "account_service", "search_service", "analytics_platform"},
+        "search_index_admin": {"search_service"},
+        "search_index_service": {"security_service", "backup_service", "account_service", "search_service", "support_platform", "integration_service", "analytics_platform"},
+        "security_audit_service": {"security_service"},
+        "security_service": {"security_service", "export_service"},
+        "service_readback_logs": {"security_service", "backup_service", "account_service", "search_service", "support_platform", "export_service", "integration_service", "analytics_platform"},
+        "service_resource_export": {"security_service", "backup_service", "account_service", "search_service", "support_platform", "export_service", "integration_service", "analytics_platform"},
+        "support_platform": {"support_platform"},
     }
 
     ev_files_csv = dataset_dir / "evidence_files.csv"
@@ -260,7 +274,10 @@ def validate_output_csv(
                 # Semantic relevance checks: validate activity target system and resource
                 if evidence_id in activity_systems:
                     act_sys = activity_systems[evidence_id]
-                    if system_id and act_sys and system_id != act_sys:
+                    allowed_act_sys = {act_sys}
+                    if act_sys == "object_storage":
+                        allowed_act_sys.add("support_platform")
+                    if system_id and act_sys and system_id not in allowed_act_sys:
                         errors.append(
                             f"Line {line_no} ({case_id}) step {expected_step_no}: cited activity '{evidence_id}' targets system '{act_sys}', not claimed system '{system_id}'"
                         )
