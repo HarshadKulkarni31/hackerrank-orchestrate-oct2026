@@ -28,7 +28,8 @@ class TestPublicSamples(unittest.TestCase):
         cls.audits = load_user_audit_entries(dataset_dir / "user_audit_log.csv")
         cls.activities = load_system_activities(dataset_dir / "system_activity.csv")
         cls.rules = load_deletion_rules(dataset_dir / "deletion_rules.csv")
-        cls.manifest = list(csv.DictReader(open(dataset_dir / "evidence_files.csv", encoding="utf-8")))
+        with open(dataset_dir / "evidence_files.csv", encoding="utf-8") as f:
+            cls.manifest = list(csv.DictReader(f))
 
         cls.dispatcher = EvidenceDispatcher(dataset_dir=dataset_dir)
         cls.dispatcher.load_all(cls.manifest)
@@ -37,10 +38,11 @@ class TestPublicSamples(unittest.TestCase):
         cls.engine = DecisionEngine(cls.resolver, cls.policy, cls.dispatcher, cls.activities)
 
     def test_samples_status_accuracy_threshold(self):
-        ground_truth = {
-            r["case_id"]: r["deletion_status"]
-            for r in csv.DictReader(open(SAMPLE_OUTPUT_PATH, encoding="utf-8"))
-        }
+        with open(SAMPLE_OUTPUT_PATH, encoding="utf-8") as f:
+            ground_truth = {
+                r["case_id"]: r["deletion_status"]
+                for r in csv.DictReader(f)
+            }
 
         correct = 0
         for req in self.requests:

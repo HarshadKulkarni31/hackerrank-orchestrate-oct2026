@@ -294,9 +294,12 @@ class EvidenceDispatcher:
             logger.debug("Failed parsing JSON %s: %s", path, e)
 
     def _parse_sql(self, file_id: str, captured_at: datetime, path: Path) -> None:
+        conn = None
         try:
+            with open(path, "r", encoding="utf-8") as f:
+                sql_content = f.read()
             conn = sqlite3.connect(":memory:")
-            conn.executescript(open(path, "r", encoding="utf-8").read())
+            conn.executescript(sql_content)
             cur = conn.cursor()
             cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
             tables = [r[0] for r in cur.fetchall()]
@@ -455,6 +458,12 @@ class EvidenceDispatcher:
                         )
         except Exception as e:
             logger.debug("Failed parsing SQL %s: %s", path, e)
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     def _parse_log(self, file_id: str, captured_at: datetime, path: Path) -> None:
         try:
@@ -526,7 +535,7 @@ class EvidenceDispatcher:
 
                     if u and (u == eh or "@" in u):
                         u = None
-                    if em and em == eh:
+                    if em and (em == eh or "@" not in em):
                         em = None
 
                     if tid:

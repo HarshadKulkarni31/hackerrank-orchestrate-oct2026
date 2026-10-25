@@ -5,12 +5,22 @@ from code.schemas import Step
 from code.reasoning.policy_engine import RecordAssessment
 from code.config import VALID_OPERATION_STATES
 
-
 FINDING_OP_ORDER = {
     "REPORT_REMAINING_RECORD": 0,
     "REPORT_EXPOSED_PII": 1,
     "REPORT_ACTIVE_DATA_FLOW": 2,
     "REPORT_RESTORE_RISK": 3,
+}
+
+SYSTEM_FINDING_ORDER = {
+    "account_service": 0,
+    "search_service": 1,
+    "export_service": 2,
+    "support_platform": 3,
+    "analytics_platform": 4,
+    "identity_service": 5,
+    "integration_service": 6,
+    "backup_service": 7,
 }
 
 REMEDIATION_OP_ORDER = {
@@ -21,7 +31,30 @@ REMEDIATION_OP_ORDER = {
     "ANONYMIZE_RECORD": 4,
 }
 
-VERIFICATION_OP_ORDER = {
+SYSTEM_REMEDIATION_ORDER = {
+    "integration_service": 0,
+    "backup_service": 1,
+    "account_service": 2,
+    "search_service": 3,
+    "export_service": 4,
+    "support_platform": 5,
+    "identity_service": 6,
+    "analytics_platform": 7,
+}
+
+SYSTEM_VERIFY_ORDER = {
+    "account_service": 0,
+    "search_service": 1,
+    "export_service": 2,
+    "security_service": 3,
+    "support_platform": 4,
+    "identity_service": 4,
+    "analytics_platform": 5,
+    "integration_service": 6,
+    "backup_service": 7,
+}
+
+VERIFY_OP_ORDER = {
     "VERIFY_RECORD_ABSENT": 0,
     "VERIFY_RECORD_PRESENT": 1,
     "VERIFY_RECORD_REDACTED": 2,
@@ -38,15 +71,28 @@ def sort_steps_canonically(steps: List[Step]) -> List[Step]:
     def sort_key(s: Step):
         p_val = phase_order_map.get(s.phase, 99)
         if s.phase == "FINDING":
-            op_val = FINDING_OP_ORDER.get(s.operation, 99)
+            return (
+                p_val,
+                FINDING_OP_ORDER.get(s.operation, 99),
+                SYSTEM_FINDING_ORDER.get(s.system_id, 99),
+                s.resource_id,
+            )
         elif s.phase == "REMEDIATION":
-            op_val = REMEDIATION_OP_ORDER.get(s.operation, 99)
+            return (
+                p_val,
+                REMEDIATION_OP_ORDER.get(s.operation, 99),
+                SYSTEM_REMEDIATION_ORDER.get(s.system_id, 99),
+                s.resource_id,
+            )
         else:
-            op_val = VERIFICATION_OP_ORDER.get(s.operation, 99)
-        return (p_val, op_val, s.system_id, s.resource_id)
+            return (
+                p_val,
+                VERIFY_OP_ORDER.get(s.operation, 99),
+                SYSTEM_VERIFY_ORDER.get(s.system_id, 99),
+                s.resource_id,
+            )
 
     sorted_list = sorted(steps, key=sort_key)
-    # Assign consecutive step numbers 1..N
     for i, s in enumerate(sorted_list, start=1):
         s.step_no = i
     return sorted_list
