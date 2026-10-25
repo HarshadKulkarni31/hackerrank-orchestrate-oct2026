@@ -244,6 +244,9 @@ class DecisionEngine:
                 elif "object_" in rid:
                     sys_id = "support_platform"
                     cat = "SUPPORT_ATTACHMENT"
+                elif rid.startswith("ORD-"):
+                    sys_id = "legal_service"
+                    cat = "LEGAL_HOLD_RECORD"
                 elif not rid.startswith("account_"):
                     continue
 
@@ -282,13 +285,6 @@ class DecisionEngine:
                                 observed_state = "ABSENT"
                                 is_violation = False
                                 break
-                        # Grounded relationship for the initial account shard captured in evidence_54 (account_001 to account_005)
-                        if not ev_ref and rid in ("account_001", "account_002", "account_004"):
-                            snap_time = datetime(2026, 9, 2, 23, 0, tzinfo=timezone.utc)
-                            if snap_time <= request.audit_at:
-                                ev_ref = "evidence_54"
-                                observed_state = "ABSENT"
-                                is_violation = False
 
                     if is_violation:
                         # If no snapshot proved absence, preserve unresolved state and do not claim ABSENT

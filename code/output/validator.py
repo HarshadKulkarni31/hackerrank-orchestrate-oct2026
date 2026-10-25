@@ -2,6 +2,7 @@
 
 import csv
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Set
@@ -63,6 +64,7 @@ def validate_output_csv(
         "identity_service": {"identity_service"},
         "integration_admin": {"integration_service"},
         "integration_management_service": {"security_service", "account_service", "search_service", "support_platform", "integration_service", "analytics_platform"},
+        "legal_retention_service": {"legal_service", "security_service"},
         "marketing_platform": {"marketing_platform"},
         "records_assurance_snapshot_bundle": {"security_service", "identity_service", "account_service", "search_service", "analytics_platform"},
         "search_index_admin": {"search_service"},
@@ -90,6 +92,7 @@ def validate_output_csv(
                     except Exception:
                         pass
 
+    activity_details: Dict[str, str] = {}
     act_csv = dataset_dir / "system_activity.csv"
     if act_csv.exists():
         with open(act_csv, mode="r", encoding="utf-8") as f:
@@ -100,6 +103,8 @@ def validate_output_csv(
                     activity_systems[aid] = r["target_system"]
                 if r.get("resource_id"):
                     activity_resources[aid] = r["resource_id"]
+                if r.get("details"):
+                    activity_details[aid] = r["details"]
                 if r.get("event_time"):
                     try:
                         evidence_timestamps[aid] = datetime.fromisoformat(
@@ -108,25 +113,83 @@ def validate_output_csv(
                     except Exception:
                         pass
 
+    user_id_set: Set[str] = set()
+    email_to_user: Dict[str, str] = {}
+    user_to_emails: Dict[str, Set[str]] = {}
+    ident_csv = dataset_dir / "user_identities.csv"
+    if ident_csv.exists():
+        with open(ident_csv, mode="r", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                u = r["user_id"]
+                em = r["email"].lower()
+                user_id_set.add(u)
+                email_to_user[em] = u
+                user_to_emails.setdefault(u, set()).add(em)
+
     audit_csv = dataset_dir / "user_audit_log.csv"
     if audit_csv.exists():
         with open(audit_csv, mode="r", encoding="utf-8") as f:
             for r in csv.DictReader(f):
                 valid_evidence_ids.add(r["audit_id"])
+                u = r.get("user_id")
+                if u:
+                    user_id_set.add(u)
+                old_val = (r.get("old_value") or "").lower()
+                new_val = (r.get("new_value") or "").lower()
+                if u and "@" in old_val:
+                    email_to_user[old_val] = u
+                    user_to_emails.setdefault(u, set()).add(old_val)
+                if u and "@" in new_val:
+                    email_to_user[new_val] = u
+                    user_to_emails.setdefault(u, set()).add(new_val)
 
-    # Load case audit cutoff timestamps
+    # Load case audit cutoff timestamps & subjects
+    case_user_ids: Dict[str, str] = {}
+    case_emails: Dict[str, Set[str]] = {}
     for req_filename in ("deletion_requests.csv", "sample_deletion_requests.csv"):
         req_csv = dataset_dir / req_filename
         if req_csv.exists():
             with open(req_csv, mode="r", encoding="utf-8") as f:
                 for r in csv.DictReader(f):
-                    if r.get("case_id") and r.get("audit_at"):
+                    cid = r.get("case_id")
+                    if not cid:
+                        continue
+                    if r.get("audit_at"):
                         try:
-                            case_audit_times[r["case_id"]] = datetime.fromisoformat(
+                            case_audit_times[cid] = datetime.fromisoformat(
                                 r["audit_at"].replace("Z", "+00:00")
                             )
                         except Exception:
                             pass
+                    req_em = (r.get("email") or "").lower()
+                    u = email_to_user.get(req_em)
+                    if u:
+                        case_user_ids[cid] = u
+                        case_emails[cid] = set(user_to_emails.get(u, {req_em}))
+                    else:
+                        case_emails[cid] = {req_em} if req_em else set()
+
+    file_resources: Dict[str, Set[str]] = {}
+    file_users: Dict[str, Set[str]] = {}
+    file_emails: Dict[str, Set[str]] = {}
+    try:
+        from code.evidence.dispatcher import EvidenceDispatcher
+        dispatcher = EvidenceDispatcher(dataset_dir=dataset_dir)
+        ev_manifest_rows = []
+        if ev_files_csv.exists():
+            with open(ev_files_csv, mode="r", encoding="utf-8") as f:
+                ev_manifest_rows = list(csv.DictReader(f))
+        dispatcher.load_all(ev_manifest_rows)
+        for rec in dispatcher.records:
+            fid = rec.evidence_id
+            if rec.resource_id:
+                file_resources.setdefault(fid, set()).add(rec.resource_id)
+            if rec.user_id:
+                file_users.setdefault(fid, set()).add(rec.user_id)
+            if rec.email:
+                file_emails.setdefault(fid, set()).add(rec.email.lower())
+    except Exception:
+        pass
 
     # 2. Read and Validate Output CSV Structure
     with open(csv_path, mode="r", encoding="utf-8") as f:
@@ -271,7 +334,7 @@ def validate_output_csv(
                             f"Line {line_no} ({case_id}) step {expected_step_no}: cited evidence '{evidence_id}' captured at {ev_captured_at.isoformat()} is AFTER case audit_at {audit_cutoff.isoformat()}"
                         )
 
-                # Semantic relevance checks: validate activity target system and resource
+                # Semantic relevance checks: validate activity target system, resource, and subject
                 if evidence_id in activity_systems:
                     act_sys = activity_systems[evidence_id]
                     allowed_act_sys = {act_sys}
@@ -286,8 +349,15 @@ def validate_output_csv(
                         errors.append(
                             f"Line {line_no} ({case_id}) step {expected_step_no}: cited activity '{evidence_id}' concerns resource '{act_res}', not claimed resource '{resource_id}'"
                         )
+                    details = activity_details.get(evidence_id, "")
+                    u_match = re.search(r"\b(user_\d+)\b", details)
+                    case_u = case_user_ids.get(case_id)
+                    if case_u and u_match and u_match.group(1) != case_u:
+                        errors.append(
+                            f"Line {line_no} ({case_id}) step {expected_step_no}: cited activity '{evidence_id}' concerns subject '{u_match.group(1)}', not case subject '{case_u}'"
+                        )
 
-                # Validate dedicated evidence file origin relevance
+                # Validate dedicated evidence file origin and subject/resource relevance
                 if evidence_id in evidence_origins:
                     origin = evidence_origins[evidence_id]
                     allowed_sys = origin_to_systems.get(origin)
@@ -295,6 +365,39 @@ def validate_output_csv(
                         errors.append(
                             f"Line {line_no} ({case_id}) step {expected_step_no}: evidence '{evidence_id}' from origin '{origin}' is not relevant to system '{system_id}'"
                         )
+
+                    # Subject & Resource relevance check for evidence files
+                    if evidence_id in file_resources or evidence_id in file_users:
+                        res_set = file_resources.get(evidence_id, set())
+                        u_set = file_users.get(evidence_id, set())
+                        em_set = file_emails.get(evidence_id, set())
+                        case_u = case_user_ids.get(case_id)
+                        case_em = case_emails.get(case_id, set())
+
+                        matches_resource = bool(resource_id and resource_id in res_set)
+                        matches_user = bool((case_u and case_u in u_set) or (case_em and bool(case_em & em_set)))
+
+                        if phase == "FINDING":
+                            if not matches_resource and not matches_user:
+                                errors.append(
+                                    f"Line {line_no} ({case_id}) step {expected_step_no}: FINDING step cites evidence '{evidence_id}' which does not contain claimed resource '{resource_id}' or subject '{case_u}'"
+                                )
+                        elif phase == "VERIFICATION":
+                            if operation in ("VERIFY_RECORD_PRESENT", "VERIFY_RECORD_REDACTED", "VERIFY_RECORD_ANONYMIZED"):
+                                if not matches_resource and not matches_user:
+                                    errors.append(
+                                        f"Line {line_no} ({case_id}) step {expected_step_no}: verification '{operation}' cites evidence '{evidence_id}' which does not contain claimed resource '{resource_id}' or subject '{case_u}'"
+                                    )
+                            elif operation == "VERIFY_RECORD_ABSENT":
+                                if not matches_resource and not matches_user and u_set and not (case_u in u_set):
+                                    if origin not in (
+                                        "customer_account_failover_replica_capture",
+                                        "records_assurance_snapshot_bundle",
+                                        "customer_account_service",
+                                    ):
+                                        errors.append(
+                                            f"Line {line_no} ({case_id}) step {expected_step_no}: VERIFY_RECORD_ABSENT cites evidence '{evidence_id}' which is targeted to other subjects ({u_set}) and cannot prove absence for '{case_u}'"
+                                        )
 
             if status == "COMPLETE":
                 if phase != "VERIFICATION":

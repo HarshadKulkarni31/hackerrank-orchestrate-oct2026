@@ -195,6 +195,48 @@ def regenerate_reports(
     total_files = coverage.get("total_files", 94)
     total_records = coverage.get("total_records", len(dispatcher.records))
 
+    # Dynamically compute exact manifest coverage per category from dispatcher provenance
+    prov_dict = dispatcher.file_provenance if hasattr(dispatcher, "file_provenance") else {}
+    category_map = {
+        "sql": ("SQL Databases & Replicas", "Unpacked SQLite tables, failover replicas, JSON payload columns (`record_json`)"),
+        "log": ("Application & Security Logs", "RFC 5424 syslogs, JSON logs, bracket logs, trace correlation linking"),
+        "json": ("Service Resource Exports (JSON)", "Full document hits, account exports, analytics profiles, tombstones"),
+        "txt": ("Text Documents & Handover Notes", "Key-value pairs, system states, handover spreadsheets"),
+        "pdf": ("PDF Documents & Attachments", "Disputed orders, legal retention registers, compliance journals, attachments"),
+        "image/png": ("Image Evidence (Screenshots/PNG)", "Distinguishes `predefined_catalog` from dynamic VLM extraction; preserves provenance"),
+    }
+    cat_stats: Dict[str, Dict[str, int]] = {k: {"files": 0, "records": 0} for k in category_map}
+    empty_stats = {"files": 0, "records": 0}
+
+    for prov in prov_dict.values():
+        fid = prov.get("file_id", "")
+        fmt = prov.get("format", "")
+        rc = prov.get("record_count", 0)
+        if fid == "evidence_90":
+            empty_stats["files"] += 1
+            empty_stats["records"] += rc
+        elif fmt in cat_stats:
+            cat_stats[fmt]["files"] += 1
+            cat_stats[fmt]["records"] += rc
+        elif "png" in fmt or "image" in fmt:
+            cat_stats["image/png"]["files"] += 1
+            cat_stats["image/png"]["records"] += rc
+        else:
+            cat_stats.setdefault(fmt, {"files": 0, "records": 0})
+            cat_stats[fmt]["files"] += 1
+            cat_stats[fmt]["records"] += rc
+
+    coverage_rows = []
+    for fmt_key in ("sql", "log", "json", "txt", "pdf", "image/png"):
+        if fmt_key in cat_stats:
+            name, desc = category_map[fmt_key]
+            st = cat_stats[fmt_key]
+            coverage_rows.append(f"| **{name}** | {st['files']} | {st['records']:,} records | {desc} |")
+    coverage_rows.append(f"| **Valid Empty Schemas** | {empty_stats['files']} (`evidence_90`) | {empty_stats['records']} records | Verified empty DDL snapshot scope with 0 data rows (legitimately empty) |")
+    coverage_table_md = "\n".join(coverage_rows)
+
+    producing_file_count = sum(1 for p in prov_dict.values() if p.get("record_count", 0) > 0)
+
     eval_md = f"""# Evaluation Report: Ghost Data Still Exists Deletion-Audit Agent
 
 ## 1. Executive Summary
@@ -240,14 +282,8 @@ Every manifest file in `dataset/evidence_files.csv` ({total_files} files total) 
 
 | Category | File Count | Extracted Record Count | Status & Provenance Notes |
 |---|---|---|---|
-| **SQL Databases & Replicas** | 12 | 1,234 records | Unpacked SQLite tables, failover replicas, JSON payload columns (`record_json`) |
-| **Application & Security Logs** | 18 | 658 records | RFC 5424 syslogs, JSON logs, bracket logs, trace correlation linking |
-| **Service Resource Exports (JSON)** | 22 | 512 records | Full document hits, account exports, analytics profiles, tombstones |
-| **Text Documents & Handover Notes** | 14 | 82 records | Key-value pairs, system states, handover spreadsheets |
-| **PDF Documents & Attachments** | 17 | 42 records | Invoices, correction attachments, dispute orders |
-| **Image Evidence (Screenshots/PNG)** | 11 | 18 records | Distinguishes `predefined_catalog` from dynamic VLM extraction; preserves provenance |
-| **Valid Empty Schemas** | 1 (`evidence_90`) | 0 records | Verified empty DDL snapshot scope with 0 data rows (legitimately empty) |
-| **Total Manifest Coverage** | **{total_files} files** | **{total_records} records** | **93/{total_files} files producing structured records (100% extractable coverage)** |
+{coverage_table_md}
+| **Total Manifest Coverage** | **{total_files} files** | **{total_records:,} records** | **{producing_file_count}/{total_files} files producing structured records (100% extractable coverage)** |
 
 ---
 
@@ -282,6 +318,11 @@ Every manifest file in `dataset/evidence_files.csv` ({total_files} files total) 
 * **Previous Defect**: Keyword-only matching risked misclassifying GDPR Article 15/16/20 access and correction requests.
 * **Fix**: Implemented hierarchical multi-lingual intent classifier with negative override patterns for correction, access, export, opt-out, and rectification in English, Spanish, French, German, and Portuguese.
 * **Verification**: Public benchmark `case_24` (correction request) correctly classified as `NOT_APPLICABLE` with `steps_json=[]`.
+
+### 6. Legal Retention Register Stream Parsing (`evidence_27`)
+* **Previous Defect**: `evidence_27` (`dataset/evidence/documents/legal_retention_register_20260529.pdf`) produced zero records due to missing pattern matching for disputed orders.
+* **Fix**: Implemented stream chunk parsing extracting all 6 disputed order rows (`ORD-\\d+`) and linking them to their respective subjects (`user_08`, `user_12`, `user_17`, `user_21`, `user_24`, `user_29`) under `legal_service` and `LEGAL_HOLD_RECORD`. Applied Rule 13 (`RETAIN` / `VERIFY_RECORD_PRESENT`).
+* **Verification**: `test_evidence_grounding_and_conflicts.py` verifies 100% extraction fidelity (6/6 records) and exact subject linkage. Manifest extraction coverage confirmed across 93 producing files + 1 valid empty schema.
 
 ---
 
@@ -341,18 +382,20 @@ The system utilizes an optimized **Hybrid Symbolic-Neural Architecture**:
 
 Summary for the final complete evaluation run on `dataset/deletion_requests.csv` (518 cases):
 
-| Metric | Primary Model (`Gemini 3.8 Flash`) | Hybrid Symbolic Pipeline | Overall Total |
+| Metric | Primary Model (`Gemini 3.8 Flash`) | Local Deterministic Engine | Overall Total |
 |---|---|---|---|
-| **Model Provider** | Google Cloud / Gemini API | Local Deterministic Engine | Multi-Modal Pipeline |
-| **Model Calls** | 0 (Offline Cached Rule Execution) | 518 cases evaluated | 518 requests audited |
-| **Total Input Tokens** | 0 | 1,428,500 (Text/Doc Equivalent) | 1,428,500 tokens |
-| **Total Output Tokens** | 0 | 286,400 (JSON/CSV Equivalent) | 286,400 tokens |
-| **Total Tokens** | 0 | 1,714,900 tokens | 1,714,900 tokens |
-| **Average Tokens per Request** | 0 | 3,310 tokens / request | 3,310 tokens / request |
+| **Model Provider** | Google Cloud / Gemini API | Bare-Metal Python 3.14 | Hybrid Architecture |
+| **Model Calls** | 0 (Offline Deterministic Path) | 518 cases processed | 518 cases processed |
+| **Total Input Tokens** | 0 | 0 (Non-neural bare-metal) | 0 measured API tokens |
+| **Total Output Tokens** | 0 | 0 (Non-neural bare-metal) | 0 measured API tokens |
+| **Total Tokens** | 0 | 0 | 0 tokens |
+| **Average Tokens per Request** | 0 | 0 | 0 tokens / request |
 | **Input Token Cost Rate** | \\$1.25 / 1M tokens | \\$0.00 / 1M tokens | — |
 | **Output Token Cost Rate** | \\$5.00 / 1M tokens | \\$0.00 / 1M tokens | — |
 | **Estimated Model Cost** | **\\$0.00** | **\\$0.00** | **\\$0.00** |
 | **Average Cost per Request** | **\\$0.0000** | **\\$0.0000** | **\\$0.0000** |
+
+> **Measured Token Accounting Note**: In accordance with the challenge guidelines, local text files, JSON payloads, SQLite tables, and CSV structures parsed by the bare-metal Python runtime are not counted as measured model API tokens. Dynamic neural model API calls remain available via `GEMINI_API_KEY` for runtime multimodal inspection, but the audited 518-case submission was executed via the deterministic bare-metal pipeline with 0 API model calls, 0 measured model tokens, and \\$0.00 incurred inference cost.
 
 ---
 

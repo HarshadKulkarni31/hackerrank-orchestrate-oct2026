@@ -61,7 +61,8 @@ class TestEvidenceIngestion(unittest.TestCase):
         unparsed = all_file_ids - active_file_ids
 
         # Only evidence_90 (empty database schema without data inserts) should have 0 records
-        self.assertEqual(unparsed, {"evidence_27", "evidence_90"})
+        self.assertEqual(unparsed, {"evidence_90"})
+        self.assertEqual(len(active_file_ids), 93)
 
 
 if __name__ == "__main__":

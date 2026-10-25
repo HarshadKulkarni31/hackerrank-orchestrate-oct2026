@@ -725,3 +725,68 @@ branch=main
 repo_root=D:\GitHub\hackerrank-orchestrate-october26
 worktree=main
 parent_agent=none
+
+
+## 2026-10-25T17:04:30+05:30 Correct Evidence Grounding, Legal Retention PDF, and Output Validation
+
+User Prompt (verbatim, secrets redacted):
+Fix the remaining defects in the current codebase directly. Do not produce another audit or implementation plan.
+
+1. In `code/reasoning/decision_engine.py`, remove the hardcoded `evidence_54` association for `account_001`, `account_002` and `account_004`. Derive account-to-evidence relationships from actual parsed records and only mark an account absent when relevant evidence proves that state at `audit_at`.
+
+2. Fix PDF extraction for `evidence_27`, `dataset/evidence/documents/legal_retention_register_20260529.pdf`. The document contains disputed-order records, user IDs and retention-until dates. Extract these records, preserve source provenance, associate them with the correct subjects and evaluate the applicable retention rules. Add regression tests so this document cannot silently produce zero records again.
+
+3. Strengthen `code/output/validator.py`. Validate subject and resource relevance for every cited evidence record, not just evidence existence, timestamp and broad system compatibility. Add negative tests using real but irrelevant evidence from the wrong subject or resource.
+
+4. Correct the manifest coverage reporting. The current independent dispatcher run produced 2,536 records from 92 files, with `evidence_27` producing no records and `evidence_90` being a valid empty schema. Regenerate the report from actual provenance data; do not claim 93 record-producing files unless the implementation demonstrates that result.
+
+5. Keep image provenance accurate. Clearly distinguish records loaded from `IMAGE_EVIDENCE_CATALOG` from records dynamically extracted by Gemini. Do not claim general-purpose OCR/VLM extraction for catalog-derived records.
+
+6. Correct `code/evaluation/usage_report.md` so token counts, API calls, costs and model usage are actual measured values. Do not count local text or JSON as measured model tokens.
+
+7. After making changes, run all tests, the benchmark evaluator and the full 518-case pipeline. Add regression tests for the account-snapshot fallback, the legal retention PDF and irrelevant evidence. Report the actual before/after metrics and remaining limitations.
+
+Preserve the official output schema, do not hardcode benchmark answers, and do not weaken existing tests. Implement the fixes and provide the actual results.
+
+Agent Response Summary:
+Eliminated the hardcoded evidence_54 account fallback in the decision engine and implemented PDF stream chunk parsing for evidence_27 to extract 6 disputed order legal retention records under legal_service. Enhanced output validation with strict subject- and resource-level evidence relevance checks and added regression tests for irrelevant evidence, legal retention PDF parsing, and account fallback behavior. Dynamically computed manifest extraction coverage (93 producing files yielding 2,541 structured records + 1 valid empty schema) and updated usage reports to reflect 0 measured external API tokens for bare-metal deterministic execution.
+
+Actions:
+* Edited code/evidence/dispatcher.py to parse legal retention disputed orders from evidence_27 and preserve provenance
+* Edited code/reasoning/decision_engine.py to remove hardcoded evidence_54 account mappings
+* Edited code/reasoning/remediation_planner.py to include legal_service in canonical ordering maps
+* Edited code/output/validator.py to validate subject- and resource-level evidence relevance
+* Edited code/tests/test_validator.py and code/tests/test_evidence_grounding_and_conflicts.py to add regression tests
+* Edited code/tests/test_evidence_ingestion.py and code/tests/test_regression.py to reflect updated coverage
+* Edited code/evaluation/evaluate.py to dynamically aggregate manifest coverage and measured token telemetry
+* Executed all 43 unit tests (all passed), regenerated evaluation reports, ran full 518-case pipeline, and re-packaged code.zip
+
+Context:
+tool=Antigravity
+model=Gemini 3.8 Flash (Medium)
+branch=main
+repo_root=D:\GitHub\hackerrank-orchestrate-october26
+worktree=main
+parent_agent=none
+
+
+## 2026-10-25T17:07:45+05:30 Push updated deletion audit system to GitHub
+
+User Prompt (verbatim, secrets redacted):
+push into github
+
+Agent Response Summary:
+Staged all modified source files, evaluation reports, and test suites covering the evidence_54 removal, legal retention PDF parsing, and semantic output validation. Created a git commit documenting the defect resolutions and pushed the changes to origin main on GitHub.
+
+Actions:
+* git add code/ evaluation/ log.txt
+* git commit -m "Fix evidence grounding, legal retention extraction, and semantic validation"
+* git push origin main
+
+Context:
+tool=Antigravity
+model=Gemini 3.8 Flash (Medium)
+branch=main
+repo_root=D:\GitHub\hackerrank-orchestrate-october26
+worktree=main
+parent_agent=none

@@ -1122,31 +1122,73 @@ class EvidenceDispatcher:
             chunks = parse_pdf_document(path)
             full_text = " ".join(chunks)
 
+            # 1. Disputed orders and legal retention register entries (e.g. evidence_27)
+            seen_rids = set()
+            for chunk in chunks:
+                ord_m = re.search(r"\b(ORD-\d+)\s*\|\s*(user_\d+)\b", chunk)
+                if ord_m:
+                    ord_id = ord_m.group(1)
+                    u_id = ord_m.group(2)
+                    if ord_id not in seen_rids:
+                        seen_rids.add(ord_id)
+                        self._add_record(
+                            EvidenceRecord(
+                                file_id,
+                                captured_at,
+                                "legal_service",
+                                ord_id,
+                                "LEGAL_HOLD_RECORD",
+                                u_id,
+                                None,
+                                None,
+                                "PRESENT",
+                                False,
+                                extraction_method="pdf_stream_decoder",
+                            )
+                        )
+
             u_match = re.search(r"\b(user_\d+)\b", full_text)
             u_doc = u_match.group(1) if u_match else None
             em_match = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", full_text)
             em_doc = em_match.group(0).lower() if em_match else None
 
-            # Standard resource IDs
+            # 2. Standard resource IDs
             for m_rid in re.finditer(r"\b(support_\d+|export_\d+|audit_record_\d+|account_\d+)\b", full_text):
                 rid = m_rid.group(1)
-                sys_id = "support_platform" if "support_" in rid else ("account_service" if "account_" in rid else "export_service")
-                cat = "SUPPORT_ATTACHMENT" if "support_" in rid else ("USER_PROFILE" if "account_" in rid else "USER_EXPORT")
+                if rid in seen_rids:
+                    continue
+                seen_rids.add(rid)
+
+                if "support_" in rid:
+                    sys_id = "support_platform"
+                    cat = "SUPPORT_ATTACHMENT"
+                elif "account_" in rid:
+                    sys_id = "account_service"
+                    cat = "USER_PROFILE"
+                elif "audit_record_" in rid:
+                    sys_id = "security_service"
+                    cat = "SECURITY_AUDIT_LOG"
+                else:
+                    sys_id = "export_service"
+                    cat = "USER_EXPORT"
+
                 self._add_record(
                     EvidenceRecord(
-                        file_id, captured_at, sys_id, rid, cat, u_doc, em_doc, None, "PRESENT", False
+                        file_id, captured_at, sys_id, rid, cat, u_doc, em_doc, None, "PRESENT", False, extraction_method="pdf_stream_decoder"
                     )
                 )
 
-            # Statement exports like NST-2026-0718-1842 -> export_1842
+            # 3. Statement exports like NST-2026-0718-1842 -> export_1842
             nst_match = re.search(r"\bNST-\d{4}-\d{4}-(\d+)\b", full_text)
             if nst_match:
                 rid = f"export_{nst_match.group(1)}"
-                self._add_record(
-                    EvidenceRecord(
-                        file_id, captured_at, "export_service", rid, "USER_EXPORT", u_doc, em_doc, None, "PRESENT", False
+                if rid not in seen_rids:
+                    seen_rids.add(rid)
+                    self._add_record(
+                        EvidenceRecord(
+                            file_id, captured_at, "export_service", rid, "USER_EXPORT", u_doc, em_doc, None, "PRESENT", False, extraction_method="pdf_stream_decoder"
+                        )
                     )
-                )
         except Exception as e:
             logger.debug("Failed parsing PDF %s: %s", path, e)
 

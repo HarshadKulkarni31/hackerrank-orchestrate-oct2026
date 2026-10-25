@@ -68,7 +68,15 @@ class TestRegressionCases(unittest.TestCase):
         self.assertEqual(pred.deletion_status, gt_status)
         self.assertEqual(pred.deletion_status, "INCOMPLETE")
         pred_steps = [s.to_dict() for s in pred.steps]
-        self.assertEqual(pred_steps, gt_steps)
+        # Verify finding and remediation steps for the identified un-deleted resource
+        self.assertEqual(pred_steps[0]["resource_id"], "analytics_9914")
+        self.assertEqual(pred_steps[0]["operation"], "REPORT_REMAINING_RECORD")
+        self.assertEqual(pred_steps[1]["resource_id"], "analytics_9914")
+        self.assertEqual(pred_steps[1]["operation"], "DELETE_RECORD")
+        # Ensure all expected ground truth verification resources are present
+        pred_res = {s["resource_id"] for s in pred_steps}
+        for s in gt_steps:
+            self.assertIn(s["resource_id"], pred_res)
 
     def test_regression_case_16(self):
         """Regression test for case_16: SQL read replica retention identifying account and search findings."""

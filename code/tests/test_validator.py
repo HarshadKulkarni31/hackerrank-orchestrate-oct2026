@@ -73,6 +73,32 @@ class TestOutputValidator(unittest.TestCase):
         self.assertFalse(is_valid)
         self.assertTrue(any("concerns resource 'account_001', not claimed resource 'account_9999'" in err for err in errors))
 
+    def test_validator_rejects_irrelevant_evidence_file_wrong_subject(self):
+        # evidence_58 is support_001 for priya.raman / user_24; citing it for case_01 (user_01) must be rejected
+        steps_json = '[{"step_no": 1, "phase": "FINDING", "system_id": "support_platform", "resource_id": "support_9999", "operation": "REPORT_REMAINING_RECORD", "state": "PRESENT", "evidence_id": "evidence_58"}]'
+        with tempfile.NamedTemporaryFile("w+", delete=False, suffix=".csv", encoding="utf-8", newline="") as tf:
+            writer = csv.writer(tf)
+            writer.writerow(["case_id", "deletion_status", "steps_json"])
+            writer.writerow(["case_01", "INCOMPLETE", steps_json])
+            tf_path = Path(tf.name)
+
+        is_valid, errors = validate_output_csv(tf_path, ["case_01"], Path("dataset"))
+        self.assertFalse(is_valid)
+        self.assertTrue(any("does not contain claimed resource" in err for err in errors))
+
+    def test_validator_rejects_irrelevant_activity_wrong_subject(self):
+        # activity_4004 details mention user_18; citing it for case_01 (user_01) must be rejected
+        steps_json = '[{"step_no": 1, "phase": "FINDING", "system_id": "export_service", "resource_id": "export_1260", "operation": "REPORT_REMAINING_RECORD", "state": "PRESENT", "evidence_id": "activity_4004"}]'
+        with tempfile.NamedTemporaryFile("w+", delete=False, suffix=".csv", encoding="utf-8", newline="") as tf:
+            writer = csv.writer(tf)
+            writer.writerow(["case_id", "deletion_status", "steps_json"])
+            writer.writerow(["case_01", "INCOMPLETE", steps_json])
+            tf_path = Path(tf.name)
+
+        is_valid, errors = validate_output_csv(tf_path, ["case_01"], Path("dataset"))
+        self.assertFalse(is_valid)
+        self.assertTrue(any("concerns subject 'user_18', not case subject 'user_01'" in err for err in errors))
+
 
 if __name__ == "__main__":
     unittest.main()

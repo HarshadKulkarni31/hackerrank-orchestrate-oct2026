@@ -162,6 +162,61 @@ class TestEvidenceGroundingAndConflicts(unittest.TestCase):
             if old_key:
                 os.environ["GEMINI_API_KEY"] = old_key
 
+    def test_legal_retention_pdf_extraction(self):
+        """evidence_27 PDF must parse disputed orders, user references, and retain dates."""
+        disp = EvidenceDispatcher(Path("dataset"))
+        pdf_path = Path("dataset/evidence/documents/legal_retention_register_20260529.pdf")
+        self.assertTrue(pdf_path.exists(), "PDF file must exist on disk")
+        disp._parse_pdf("evidence_27", datetime(2026, 5, 29, 8, 0, tzinfo=timezone.utc), pdf_path)
+        recs = [r for r in disp.records if r.evidence_id == "evidence_27"]
+        self.assertEqual(len(recs), 6, "Must extract exactly 6 disputed order legal retention records")
+        expected_pairs = {
+            ("ORD-20264118", "user_08"),
+            ("ORD-20264207", "user_12"),
+            ("ORD-20264319", "user_17"),
+            ("ORD-20264402", "user_21"),
+            ("ORD-20264511", "user_24"),
+            ("ORD-20264600", "user_29"),
+        }
+        actual_pairs = {(r.resource_id, r.user_id) for r in recs}
+        self.assertEqual(actual_pairs, expected_pairs)
+        for r in recs:
+            self.assertEqual(r.system_id, "legal_service")
+            self.assertEqual(r.data_category, "LEGAL_HOLD_RECORD")
+            self.assertEqual(r.state, "PRESENT")
+            self.assertEqual(r.extraction_method, "pdf_stream_decoder")
+
+    def test_no_hardcoded_evidence_54_for_sample_accounts(self):
+        """Accounts account_001, account_002, account_004 must not artificially receive evidence_54."""
+        req = DeletionRequest(
+            case_id="case_unobserved_account",
+            email="test@example.com",
+            requested_at=datetime(2026, 8, 1, 10, 0, tzinfo=timezone.utc),
+            reported_status="COMPLETE",
+            reported_at=datetime(2026, 8, 2, 10, 0, tzinfo=timezone.utc),
+            audit_at=datetime(2026, 9, 5, 10, 0, tzinfo=timezone.utc),
+            request_text="Delete my account data.",
+        )
+        engine = DecisionEngine(self.resolver, self.policy, self.dispatcher, [])
+        pred = engine.evaluate_case(req)
+        cited_evidence_ids = {s.evidence_id for s in pred.steps if s.evidence_id}
+        self.assertNotIn("evidence_54", cited_evidence_ids, "evidence_54 must not be assigned without grounded evidence")
+
+    def test_legal_hold_retention_policy_assessment(self):
+        """Active legal hold must assess as RETAIN with VERIFY_RECORD_PRESENT."""
+        rules = [DeletionRule("rule_13", "LEGAL_HOLD_RECORD", "A supplied legal hold is active", "RETAIN")]
+        policy = PolicyEngine(rules)
+        ass = policy.assess_record(
+            system_id="legal_service",
+            resource_id="ORD-20264118",
+            data_category="LEGAL_HOLD_RECORD",
+            observed_state="PRESENT",
+            evidence_id="evidence_27",
+        )
+        self.assertFalse(ass.is_violation)
+        self.assertEqual(ass.required_action, "RETAIN")
+        self.assertEqual(ass.verification_operation, "VERIFY_RECORD_PRESENT")
+
 
 if __name__ == "__main__":
     unittest.main()

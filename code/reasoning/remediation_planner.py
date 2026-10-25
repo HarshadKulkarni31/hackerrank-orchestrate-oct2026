@@ -21,6 +21,7 @@ SYSTEM_FINDING_ORDER = {
     "integration_service": 5,
     "backup_service": 6,
     "identity_service": 7,
+    "legal_service": 8,
 }
 
 REMEDIATION_OP_ORDER = {
@@ -40,6 +41,7 @@ SYSTEM_REMEDIATION_ORDER = {
     "support_platform": 5,
     "analytics_platform": 6,
     "identity_service": 7,
+    "legal_service": 8,
 }
 
 SYSTEM_VERIFY_ORDER = {
@@ -52,6 +54,7 @@ SYSTEM_VERIFY_ORDER = {
     "integration_service": 6,
     "backup_service": 7,
     "identity_service": 8,
+    "legal_service": 9,
 }
 
 VERIFY_OP_ORDER = {
