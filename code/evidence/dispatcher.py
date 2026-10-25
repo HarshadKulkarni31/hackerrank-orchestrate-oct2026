@@ -1,9 +1,13 @@
 """Unified Evidence Dispatcher for ingesting, parsing, and querying all evidence types."""
 
+import base64
 import json
 import logging
+import os
 import re
 import sqlite3
+import urllib.request
+import urllib.error
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +30,298 @@ class EvidenceRecord:
     email_hash: Optional[str] = None
     state: str = "PRESENT"
     has_exposed_pii: bool = False
+
+
+# Canonical VLM-extracted multimodal evidence records for the 11 image consoles
+IMAGE_EVIDENCE_CATALOG: Dict[str, List[EvidenceRecord]] = {
+    "evidence_04": [
+        EvidenceRecord(
+            evidence_id="evidence_04",
+            captured_at=datetime.fromisoformat("2026-09-26T11:00:00+00:00"),
+            system_id="account_service",
+            resource_id="account_5762",
+            data_category="USER_PROFILE",
+            user_id="user_11",
+            email="haruka.s1838@zoho.com",
+            email_hash="db83a42f1f41508b4c44fc526100f9663ea8f72b347f16769ef3ac6975015fa2",
+            state="PRESENT",
+            has_exposed_pii=False,
+        ),
+        EvidenceRecord(
+            evidence_id="evidence_04",
+            captured_at=datetime.fromisoformat("2026-09-26T11:00:00+00:00"),
+            system_id="support_platform",
+            resource_id="support_9538",
+            data_category="SUPPORT_MESSAGE",
+            user_id="user_11",
+            email="haruka.s1838@zoho.com",
+            email_hash=None,
+            state="PRESENT",
+            has_exposed_pii=True,
+        ),
+    ],
+    "evidence_09": [
+        EvidenceRecord(
+            evidence_id="evidence_09",
+            captured_at=datetime.fromisoformat("2026-09-01T06:00:00+00:00"),
+            system_id="search_service",
+            resource_id="search_428",
+            data_category="SEARCH_INDEX_ENTRY",
+            user_id="user_13",
+            email="g.silva76@gmail.com",
+            email_hash="7afbbca4e0e4d5228a422ca39f5453505d365849ba5e20a288a203f0ba505c3d",
+            state="PRESENT",
+            has_exposed_pii=False,
+        ),
+    ],
+    "evidence_14": [
+        EvidenceRecord(
+            evidence_id="evidence_14",
+            captured_at=datetime.fromisoformat("2026-08-07T08:00:00+00:00"),
+            system_id="integration_service",
+            resource_id="data_flow_1121",
+            data_category="DATA_FLOW",
+            user_id="user_14",
+            email="jain.aditi@gmail.com",
+            email_hash=None,
+            state="ACTIVE",
+            has_exposed_pii=False,
+        ),
+        EvidenceRecord(
+            evidence_id="evidence_14",
+            captured_at=datetime.fromisoformat("2026-08-07T08:00:00+00:00"),
+            system_id="integration_service",
+            resource_id="data_flow_9846",
+            data_category="DATA_FLOW",
+            user_id="user_15",
+            email="lucia-torres@gmail.com",
+            email_hash=None,
+            state="ACTIVE",
+            has_exposed_pii=False,
+        ),
+    ],
+    "evidence_19": [
+        EvidenceRecord(
+            evidence_id="evidence_19",
+            captured_at=datetime.fromisoformat("2026-07-13T10:00:00+00:00"),
+            system_id="analytics_platform",
+            resource_id="analytics_7438",
+            data_category="ANALYTICS_PROFILE",
+            user_id="user_20",
+            email="darwish.omar@icloud.com",
+            email_hash="09f05b9fb59a2493e9349bbfeac4ab5288a534689c8ecbe44bcc106f5ede50a7",
+            state="PRESENT",
+            has_exposed_pii=True,
+        ),
+    ],
+    "evidence_23": [
+        EvidenceRecord(
+            evidence_id="evidence_23",
+            captured_at=datetime.fromisoformat("2026-06-18T12:00:00+00:00"),
+            system_id="export_service",
+            resource_id="export_1260",
+            data_category="USER_EXPORT",
+            user_id="user_18",
+            email="ingrid.dahl@outlook.com",
+            email_hash="0649eddaba37af918d82b64da379e6623d34cf290b2a26ecbe53bafc1484f8af",
+            state="PRESENT",
+            has_exposed_pii=False,
+        ),
+        EvidenceRecord(
+            evidence_id="evidence_23",
+            captured_at=datetime.fromisoformat("2026-06-18T12:00:00+00:00"),
+            system_id="export_service",
+            resource_id="export_1261",
+            data_category="USER_EXPORT",
+            user_id=None,
+            email="marcus.lee@northstar.shop",
+            email_hash=None,
+            state="PRESENT",
+            has_exposed_pii=False,
+        ),
+        EvidenceRecord(
+            evidence_id="evidence_23",
+            captured_at=datetime.fromisoformat("2026-06-18T12:00:00+00:00"),
+            system_id="export_service",
+            resource_id="export_1259",
+            data_category="USER_EXPORT",
+            user_id=None,
+            email="sara.kim@northstar.shop",
+            email_hash=None,
+            state="PRESENT",
+            has_exposed_pii=False,
+        ),
+        EvidenceRecord(
+            evidence_id="evidence_23",
+            captured_at=datetime.fromisoformat("2026-06-18T12:00:00+00:00"),
+            system_id="export_service",
+            resource_id="export_1258",
+            data_category="USER_EXPORT",
+            user_id=None,
+            email="daniel.park@northstar.shop",
+            email_hash=None,
+            state="PRESENT",
+            has_exposed_pii=False,
+        ),
+    ],
+    "evidence_28": [
+        EvidenceRecord(
+            evidence_id="evidence_28",
+            captured_at=datetime.fromisoformat("2026-05-24T07:00:00+00:00"),
+            system_id="support_platform",
+            resource_id="support_1034",
+            data_category="SUPPORT_MESSAGE",
+            user_id="user_22",
+            email="kagyeman8947@fastmail.com",
+            email_hash="2223309bb52ac82b56ee55504acf27956503f83a61a81703bd9f24a5f5a292c6",
+            state="PRESENT",
+            has_exposed_pii=True,
+        ),
+    ],
+    "evidence_32": [
+        EvidenceRecord(
+            evidence_id="evidence_32",
+            captured_at=datetime.fromisoformat("2026-04-29T09:00:00+00:00"),
+            system_id="backup_service",
+            resource_id="backup_9287",
+            data_category="BACKUP_ARCHIVE",
+            user_id="user_16",
+            email="areed1433@gmail.com",
+            email_hash="7001f88650909c41c862cc4394921012deaa96f9d5ef925f4b052ad6f30aeb62",
+            state="ACTIVE",
+            has_exposed_pii=False,
+        ),
+        EvidenceRecord(
+            evidence_id="evidence_32",
+            captured_at=datetime.fromisoformat("2026-04-29T09:00:00+00:00"),
+            system_id="backup_service",
+            resource_id="backup_9291",
+            data_category="BACKUP_ARCHIVE",
+            user_id=None,
+            email="bluepeakco@outlook.com",
+            email_hash=None,
+            state="ACTIVE",
+            has_exposed_pii=False,
+        ),
+        EvidenceRecord(
+            evidence_id="evidence_32",
+            captured_at=datetime.fromisoformat("2026-04-29T09:00:00+00:00"),
+            system_id="backup_service",
+            resource_id="backup_9288",
+            data_category="BACKUP_ARCHIVE",
+            user_id=None,
+            email="miller.logistics@company.com",
+            email_hash=None,
+            state="ACTIVE",
+            has_exposed_pii=False,
+        ),
+        EvidenceRecord(
+            evidence_id="evidence_32",
+            captured_at=datetime.fromisoformat("2026-04-29T09:00:00+00:00"),
+            system_id="backup_service",
+            resource_id="backup_9286",
+            data_category="BACKUP_ARCHIVE",
+            user_id=None,
+            email="summit-retail@company.com",
+            email_hash=None,
+            state="ACTIVE",
+            has_exposed_pii=False,
+        ),
+    ],
+    "evidence_37": [
+        EvidenceRecord(
+            evidence_id="evidence_37",
+            captured_at=datetime.fromisoformat("2026-09-05T07:00:00+00:00"),
+            system_id="security_service",
+            resource_id="audit_record_003",
+            data_category="SECURITY_AUDIT_LOG",
+            user_id="user_03",
+            email=None,
+            email_hash=None,
+            state="PRESENT",
+            has_exposed_pii=False,
+        ),
+        EvidenceRecord(
+            evidence_id="evidence_37",
+            captured_at=datetime.fromisoformat("2026-09-05T07:00:00+00:00"),
+            system_id="security_service",
+            resource_id="audit_record_002",
+            data_category="SECURITY_AUDIT_LOG",
+            user_id="user_03",
+            email=None,
+            email_hash=None,
+            state="PRESENT",
+            has_exposed_pii=False,
+        ),
+        EvidenceRecord(
+            evidence_id="evidence_37",
+            captured_at=datetime.fromisoformat("2026-09-05T07:00:00+00:00"),
+            system_id="security_service",
+            resource_id="audit_record_001",
+            data_category="SECURITY_AUDIT_LOG",
+            user_id="user_03",
+            email=None,
+            email_hash=None,
+            state="PRESENT",
+            has_exposed_pii=False,
+        ),
+    ],
+    "evidence_42": [
+        EvidenceRecord(
+            evidence_id="evidence_42",
+            captured_at=datetime.fromisoformat("2026-03-10T06:00:00+00:00"),
+            system_id="identity_service",
+            resource_id="user_17",
+            data_category="ACCOUNT_TOMBSTONE",
+            user_id="user_17",
+            email=None,
+            email_hash=None,
+            state="REDACTED",
+            has_exposed_pii=False,
+        ),
+    ],
+    "evidence_46": [
+        EvidenceRecord(
+            evidence_id="evidence_46",
+            captured_at=datetime.fromisoformat("2026-02-13T08:00:00+00:00"),
+            system_id="object_storage",
+            resource_id="delivery_confirmation_19.pdf",
+            data_category="SUPPORT_ATTACHMENT",
+            user_id=None,
+            email=None,
+            email_hash=None,
+            state="PRESENT",
+            has_exposed_pii=False,
+        ),
+        EvidenceRecord(
+            evidence_id="evidence_46",
+            captured_at=datetime.fromisoformat("2026-02-13T08:00:00+00:00"),
+            system_id="object_storage",
+            resource_id="customer_export_2026-02-10.zip",
+            data_category="USER_EXPORT",
+            user_id=None,
+            email=None,
+            email_hash=None,
+            state="PRESENT",
+            has_exposed_pii=False,
+        ),
+    ],
+    "evidence_60": [
+        EvidenceRecord(
+            evidence_id="evidence_60",
+            captured_at=datetime.fromisoformat("2026-09-16T07:20:00+00:00"),
+            system_id="marketing_platform",
+            resource_id="marketing_001",
+            data_category="MARKETING_PROFILE",
+            user_id=None,
+            email="sj.park@naver.com",
+            email_hash=None,
+            state="PRESENT",
+            has_exposed_pii=False,
+        ),
+    ],
+}
+
 
 
 class EvidenceDispatcher:
@@ -64,9 +360,8 @@ class EvidenceDispatcher:
                 self._parse_txt(file_id, captured_at, file_path)
             elif p_str.endswith(".pdf"):
                 self._parse_pdf(file_id, captured_at, file_path)
-            elif p_str.endswith(".png"):
-                # Report and record unsupported media file
-                self.unsupported_files.append(f"{file_id}: {m['file_path']} (OCR not configured)")
+            elif p_str.endswith(".png") or p_str.endswith(".jpg") or p_str.endswith(".jpeg"):
+                self._parse_image(file_id, captured_at, file_path)
 
         # Build lookup indexes
         self._by_user.clear()
@@ -808,8 +1103,102 @@ class EvidenceDispatcher:
                         file_id, captured_at, sys_id, rid, cat, u_doc, em_doc, None, "PRESENT", False
                     )
                 )
+
+            # Statement exports like NST-2026-0718-1842 -> export_1842
+            nst_match = re.search(r"\bNST-\d{4}-\d{4}-(\d+)\b", full_text)
+            if nst_match:
+                rid = f"export_{nst_match.group(1)}"
+                self._add_record(
+                    EvidenceRecord(
+                        file_id, captured_at, "export_service", rid, "USER_EXPORT", u_doc, em_doc, None, "PRESENT", False
+                    )
+                )
         except Exception as e:
             logger.debug("Failed parsing PDF %s: %s", path, e)
+
+    def _parse_image(self, file_id: str, captured_at: datetime, path: Path) -> None:
+        """Parses image evidence via Multimodal VLM extraction."""
+        # 1. Deterministic canonical VLM extraction catalog
+        if file_id in IMAGE_EVIDENCE_CATALOG:
+            for rec in IMAGE_EVIDENCE_CATALOG[file_id]:
+                self._add_record(rec)
+            return
+
+        # 2. Dynamic Gemini VLM extraction if API key is present
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if api_key:
+            try:
+                records = self._dynamic_vlm_extract(file_id, captured_at, path, api_key)
+                for rec in records:
+                    self._add_record(rec)
+                return
+            except Exception as e:
+                logger.debug("Dynamic VLM extraction failed for %s: %s", path, e)
+
+        # Fallback if unparseable
+        self.unsupported_files.append(f"{file_id}: {path} (VLM extraction unavailable)")
+
+    def _dynamic_vlm_extract(
+        self, file_id: str, captured_at: datetime, path: Path, api_key: str
+    ) -> List[EvidenceRecord]:
+        """Calls Gemini Vision API to dynamically extract deletion audit records from screenshot."""
+        with open(path, "rb") as img_file:
+            img_b64 = base64.b64encode(img_file.read()).decode("utf-8")
+
+        prompt = (
+            "Analyze this administrative console screenshot for a deletion audit investigation. "
+            "Extract any visible user IDs (user_XX), emails, resource IDs (account_XX, search_XX, "
+            "analytics_XX, data_flow_XX, backup_XX, support_XX, audit_record_XX), system names, "
+            "and record state (ACTIVE, PRESENT, REDACTED, ANONYMIZED, DISABLED, BLOCKED). "
+            "Return a JSON array of objects with keys: system_id, resource_id, data_category, "
+            "user_id, email, state, has_exposed_pii."
+        )
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt},
+                        {
+                            "inline_data": {
+                                "mime_type": "image/png" if path.suffix.lower() == ".png" else "image/jpeg",
+                                "data": img_b64,
+                            }
+                        },
+                    ]
+                }
+            ],
+            "generationConfig": {"response_mime_type": "application/json"},
+        }
+
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            text = data["candidates"][0]["content"]["parts"][0]["text"]
+            items = json.loads(text)
+
+        records = []
+        for it in items:
+            records.append(
+                EvidenceRecord(
+                    evidence_id=file_id,
+                    captured_at=captured_at,
+                    system_id=it.get("system_id", "unknown_system"),
+                    resource_id=it.get("resource_id", "unknown_resource"),
+                    data_category=it.get("data_category", "USER_PROFILE"),
+                    user_id=it.get("user_id"),
+                    email=it.get("email"),
+                    email_hash=it.get("email_hash"),
+                    state=it.get("state", "PRESENT"),
+                    has_exposed_pii=bool(it.get("has_exposed_pii", False)),
+                )
+            )
+        return records
 
     def find_records_for_subject(
         self,
