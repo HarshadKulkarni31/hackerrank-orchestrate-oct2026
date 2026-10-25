@@ -152,7 +152,18 @@ class PolicyEngine:
 
         # 4. Action DELETE
         if action == "DELETE":
-            if observed_state == "PRESENT":
+            if observed_state == "ABSENT":
+                return RecordAssessment(
+                    system_id=system_id,
+                    resource_id=resource_id,
+                    data_category=data_category,
+                    required_action="DELETE",
+                    observed_state="ABSENT",
+                    is_violation=False,
+                    evidence_id=evidence_id,
+                    verification_operation="VERIFY_RECORD_ABSENT",
+                )
+            else:
                 return RecordAssessment(
                     system_id=system_id,
                     resource_id=resource_id,
@@ -163,17 +174,6 @@ class PolicyEngine:
                     evidence_id=evidence_id,
                     violation_operation="REPORT_REMAINING_RECORD",
                     remediation_operation="DELETE_RECORD",
-                    verification_operation="VERIFY_RECORD_ABSENT",
-                )
-            else:
-                return RecordAssessment(
-                    system_id=system_id,
-                    resource_id=resource_id,
-                    data_category=data_category,
-                    required_action="DELETE",
-                    observed_state="ABSENT",
-                    is_violation=False,
-                    evidence_id=evidence_id,
                     verification_operation="VERIFY_RECORD_ABSENT",
                 )
 

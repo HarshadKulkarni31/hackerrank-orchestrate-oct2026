@@ -30,6 +30,7 @@ class EvidenceRecord:
     email_hash: Optional[str] = None
     state: str = "PRESENT"
     has_exposed_pii: bool = False
+    extraction_method: str = "structured_parser"
 
 
 # Canonical VLM-extracted multimodal evidence records for the 11 image consoles
@@ -333,15 +334,28 @@ class EvidenceDispatcher:
         self._by_email_hash: Dict[str, List[EvidenceRecord]] = {}
         self._by_resource: Dict[str, List[EvidenceRecord]] = {}
         self.unsupported_files: List[str] = []
+        self.file_provenance: Dict[str, Dict[str, Any]] = {}
 
     def load_all(self, manifest_rows: List[Dict[str, str]]) -> None:
-        """Parses all evidence files listed in the manifest."""
+        """Parses all evidence files listed in the manifest, tracking exact provenance and counts."""
         self.records.clear()
         self.unsupported_files.clear()
+        self.file_provenance.clear()
         for m in manifest_rows:
             file_id = m["file_id"]
+            origin = m.get("origin", "")
             file_path = self.dataset_dir / m["file_path"]
             if not file_path.exists():
+                self.unsupported_files.append(f"{file_id}: {file_path} (File not found on disk)")
+                self.file_provenance[file_id] = {
+                    "file_id": file_id,
+                    "file_path": str(m["file_path"]),
+                    "origin": origin,
+                    "format": "missing",
+                    "extraction_method": "missing_file",
+                    "record_count": 0,
+                    "status": "FILE_NOT_FOUND",
+                }
                 continue
 
             cap_str = m["captured_at"]
@@ -350,6 +364,10 @@ class EvidenceDispatcher:
             captured_at = datetime.fromisoformat(cap_str)
 
             p_str = str(file_path).lower()
+            ext = p_str.split(".")[-1] if "." in p_str else "unknown"
+            prev_len = len(self.records)
+            method = "structured_parser"
+
             if p_str.endswith(".json"):
                 self._parse_json(file_id, captured_at, file_path)
             elif p_str.endswith(".sql"):
@@ -361,7 +379,23 @@ class EvidenceDispatcher:
             elif p_str.endswith(".pdf"):
                 self._parse_pdf(file_id, captured_at, file_path)
             elif p_str.endswith(".png") or p_str.endswith(".jpg") or p_str.endswith(".jpeg"):
-                self._parse_image(file_id, captured_at, file_path)
+                method = self._parse_image(file_id, captured_at, file_path, origin=origin)
+            else:
+                method = "unsupported"
+                self.unsupported_files.append(f"{file_id}: {file_path} (Unsupported file extension)")
+
+            added_count = len(self.records) - prev_len
+            if file_id not in self.file_provenance:
+                status = "SUCCESS" if added_count > 0 else ("VALID_EMPTY" if file_id == "evidence_90" else "NO_RECORDS_EXTRACTED")
+                self.file_provenance[file_id] = {
+                    "file_id": file_id,
+                    "file_path": str(m["file_path"]),
+                    "origin": origin,
+                    "format": ext,
+                    "extraction_method": method,
+                    "record_count": added_count,
+                    "status": status,
+                }
 
         # Build lookup indexes
         self._by_user.clear()
@@ -1116,13 +1150,25 @@ class EvidenceDispatcher:
         except Exception as e:
             logger.debug("Failed parsing PDF %s: %s", path, e)
 
-    def _parse_image(self, file_id: str, captured_at: datetime, path: Path) -> None:
-        """Parses image evidence via Multimodal VLM extraction."""
+    def _parse_image(
+        self, file_id: str, captured_at: datetime, path: Path, origin: str = ""
+    ) -> str:
+        """Parses image evidence via Multimodal VLM extraction, tracking exact provenance."""
         # 1. Deterministic canonical VLM extraction catalog
         if file_id in IMAGE_EVIDENCE_CATALOG:
             for rec in IMAGE_EVIDENCE_CATALOG[file_id]:
+                rec.extraction_method = "predefined_catalog"
                 self._add_record(rec)
-            return
+            self.file_provenance[file_id] = {
+                "file_id": file_id,
+                "file_path": str(path),
+                "origin": origin,
+                "format": "image/png",
+                "extraction_method": "predefined_catalog",
+                "record_count": len(IMAGE_EVIDENCE_CATALOG[file_id]),
+                "status": "SUCCESS",
+            }
+            return "predefined_catalog"
 
         # 2. Dynamic Gemini VLM extraction if API key is present
         api_key = os.environ.get("GEMINI_API_KEY")
@@ -1130,13 +1176,47 @@ class EvidenceDispatcher:
             try:
                 records = self._dynamic_vlm_extract(file_id, captured_at, path, api_key)
                 for rec in records:
+                    rec.extraction_method = "gemini_vlm"
                     self._add_record(rec)
-                return
+                self.file_provenance[file_id] = {
+                    "file_id": file_id,
+                    "file_path": str(path),
+                    "origin": origin,
+                    "format": "image/png",
+                    "extraction_method": "gemini_vlm",
+                    "record_count": len(records),
+                    "status": "SUCCESS",
+                }
+                return "gemini_vlm"
             except Exception as e:
                 logger.debug("Dynamic VLM extraction failed for %s: %s", path, e)
+                self.file_provenance[file_id] = {
+                    "file_id": file_id,
+                    "file_path": str(path),
+                    "origin": origin,
+                    "format": "image/png",
+                    "extraction_method": "gemini_vlm_failed",
+                    "record_count": 0,
+                    "status": "EXTRACTION_FAILURE",
+                    "error": str(e),
+                }
+                self.unsupported_files.append(f"{file_id}: {path} (Dynamic VLM extraction failed: {e})")
+                return "gemini_vlm_failed"
 
         # Fallback if unparseable
-        self.unsupported_files.append(f"{file_id}: {path} (VLM extraction unavailable)")
+        msg = f"{file_id}: {path} (Image VLM extraction unavailable: file not in predefined catalog and GEMINI_API_KEY is not configured)"
+        self.unsupported_files.append(msg)
+        self.file_provenance[file_id] = {
+            "file_id": file_id,
+            "file_path": str(path),
+            "origin": origin,
+            "format": "image/png",
+            "extraction_method": "unsupported",
+            "record_count": 0,
+            "status": "UNSUPPORTED_FORMAT",
+            "error": "VLM extraction unavailable: missing catalog entry and GEMINI_API_KEY not configured",
+        }
+        return "unsupported"
 
     def _dynamic_vlm_extract(
         self, file_id: str, captured_at: datetime, path: Path, api_key: str
@@ -1253,3 +1333,35 @@ class EvidenceDispatcher:
         if resource_id not in self._by_resource:
             return []
         return [r for r in self._by_resource[resource_id] if r.captured_at <= cutoff_time]
+
+    def get_coverage_summary(self) -> Dict[str, Any]:
+        """Returns summary counts across all processed evidence files."""
+        total_files = len(self.file_provenance)
+        total_records = len(self.records)
+        methods: Dict[str, int] = {}
+        statuses: Dict[str, int] = {}
+        for prov in self.file_provenance.values():
+            m = prov.get("extraction_method", "unknown")
+            s = prov.get("status", "unknown")
+            methods[m] = methods.get(m, 0) + 1
+            statuses[s] = statuses.get(s, 0) + 1
+        return {
+            "total_files": total_files,
+            "total_records": total_records,
+            "extraction_methods": methods,
+            "file_statuses": statuses,
+            "unsupported_count": len(self.unsupported_files),
+        }
+
+    def generate_coverage_markdown_table(self) -> str:
+        """Generates a detailed Markdown coverage table across all manifest files."""
+        lines = [
+            "| File ID | Origin | Path | Format | Method | Records | Status |",
+            "|---|---|---|---|---|---|---|",
+        ]
+        for fid in sorted(self.file_provenance.keys(), key=lambda x: int(x.split("_")[1]) if "_" in x and x.split("_")[1].isdigit() else x):
+            info = self.file_provenance[fid]
+            lines.append(
+                f"| `{fid}` | {info.get('origin', '')} | `{info.get('file_path', '')}` | {info.get('format', '')} | {info.get('extraction_method', '')} | {info.get('record_count', 0)} | {info.get('status', '')} |"
+            )
+        return "\n".join(lines)
