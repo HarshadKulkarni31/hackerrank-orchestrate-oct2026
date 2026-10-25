@@ -2,10 +2,10 @@
 
 ## 1. Overview and Architecture
 
-This report details the execution telemetry, model invocation counts, token consumption, and cost analysis for the final full-dataset run of the **Ghost Data Still Exists** deletion audit system, which produced the final `output.csv` (518 evaluation cases).
+This report details the execution telemetry, model invocation counts, token consumption, and cost analysis for the final full-dataset run of the **Ghost Data Still Exists** deletion audit system, which produced the final root `output.csv` (518 evaluation cases).
 
-The audited pipeline execution for this run operated as a **100% Deterministic Local Bare-Metal Engine**:
-1. All 518 cases were parsed, cross-referenced, evaluated, and verified using bare-metal Python with zero external model API calls and zero incurred inference cost.
+The executed pipeline operated as a **100% Pure Deterministic Local Bare-Metal Engine**:
+1. All 518 cases were parsed, cross-referenced, evaluated, and verified using bare-metal Python with **0 external model API calls**, **0 input tokens**, **0 output tokens**, and **\$0.00 incurred inference cost**.
 2. Structured tasks (schema parsing, SQLite table queries, regex intent classification, historical identity resolution, DAG planning, and strict CSV serialization) run with zero network latency and 100% deterministic reproducibility.
 3. Configured capabilities vs. Exercised capabilities:
    - **Exercised**: Deterministic evidence ingestion across all 94 manifest files, canonical image catalog ingestion (`predefined_catalog`), and deterministic policy assessment.
@@ -31,8 +31,8 @@ Summary for the final complete evaluation run on `dataset/deletion_requests.csv`
 
 | Metric | Primary Model (`Gemini 3.8 Flash`) | Local Deterministic Engine | Overall Total |
 |---|---|---|---|
-| **Model Provider** | Google Cloud / Gemini API | Bare-Metal Python 3.14 | Hybrid Architecture |
-| **Model Calls** | 0 (Offline Deterministic Path) | 518 cases processed | 518 cases processed |
+| **Model Provider** | Google Cloud / Gemini API | Bare-Metal Python 3.14 | Local Deterministic Architecture |
+| **Model Calls** | 0 (Offline Deterministic Path) | 518 cases processed | 0 API calls |
 | **Total Input Tokens** | 0 | 0 (Non-neural bare-metal) | 0 measured API tokens |
 | **Total Output Tokens** | 0 | 0 (Non-neural bare-metal) | 0 measured API tokens |
 | **Total Tokens** | 0 | 0 | 0 tokens |
@@ -42,13 +42,13 @@ Summary for the final complete evaluation run on `dataset/deletion_requests.csv`
 | **Estimated Model Cost** | **\$0.00** | **\$0.00** | **\$0.00** |
 | **Average Cost per Request** | **\$0.0000** | **\$0.0000** | **\$0.0000** |
 
-> **Measured Token Accounting Note**: In accordance with the challenge guidelines, local text files, JSON payloads, SQLite tables, and CSV structures parsed by the bare-metal Python runtime are not counted as measured model API tokens. Dynamic neural model API calls remain available via `GEMINI_API_KEY` for runtime multimodal inspection, but the audited 518-case submission was executed via the deterministic bare-metal pipeline with 0 API model calls, 0 measured model tokens, and \$0.00 incurred inference cost.
+> **Pure Deterministic Execution Note**: In accordance with the challenge guidelines, local text files, JSON payloads, SQLite tables, and CSV structures parsed by the bare-metal Python runtime are not counted as measured model API tokens. The executed 518-case run was executed entirely locally with 0 API model calls, 0 measured model tokens, and **\$0.00 total inference cost**.
 
 ---
 
 ## 4. Performance & Efficiency Analysis
 
-* **Full Run Duration**: **0.27 seconds** for all 518 cases (~0.53 ms per case).
-* **Throughput**: **1896 requests / second**.
+* **Full Run Duration**: **0.31 seconds** for all 518 cases (~0.59 ms per case).
+* **Throughput**: **1688 requests / second**.
 * **Zero Failure Rate**: 100% of cases parsed, evaluated, serialized, and strictly validated without unhandled exceptions or timeout retries.
-* **Cost Efficiency**: By grounding all policy decisions and identity links in verifiable evidence structures rather than unconstrained LLM hallucinations, the pipeline achieves enterprise-grade audit fidelity at essentially **\$0.00 marginal operational cost**.
+* **Cost Efficiency**: By grounding all policy decisions and identity links in verifiable evidence structures rather than unconstrained LLM hallucinations, the pipeline achieves enterprise-grade audit fidelity at **\$0.00 marginal operational cost**.

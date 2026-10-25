@@ -3,7 +3,7 @@
 import csv
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Set
 
@@ -389,10 +389,30 @@ def validate_output_csv(
                                         f"Line {line_no} ({case_id}) step {expected_step_no}: verification '{operation}' cites evidence '{evidence_id}' which does not contain claimed resource '{resource_id}' or subject '{case_u}'"
                                     )
                             elif operation == "VERIFY_RECORD_ABSENT":
-                                if not matches_resource and not matches_user:
-                                    errors.append(
-                                        f"Line {line_no} ({case_id}) step {expected_step_no}: VERIFY_RECORD_ABSENT cites evidence '{evidence_id}' which does not contain claimed resource '{resource_id}' or subject '{case_u}'"
-                                    )
+                                if matches_resource:
+                                    rec_states = [r.state for r in dispatcher.find_records_by_resource_id(resource_id, case_audit_times.get(case_id, datetime.max.replace(tzinfo=timezone.utc)))]
+                                    if any(st == "PRESENT" for st in rec_states):
+                                        errors.append(
+                                            f"Line {line_no} ({case_id}) step {expected_step_no}: VERIFY_RECORD_ABSENT cites evidence '{evidence_id}' where resource '{resource_id}' is PRESENT"
+                                        )
+                                elif not matches_user:
+                                    snapshot_origins = {
+                                        "customer_account_failover_replica_capture",
+                                        "customer_account_service",
+                                        "customer_data_failover_replica_capture",
+                                        "customer_data_read_replica_capture",
+                                        "customer_data_regional_replicas_capture",
+                                        "customer_data_reporting_replica_capture",
+                                        "customer_search_primary_capture",
+                                        "records_assurance_snapshot_bundle",
+                                        "service_resource_export",
+                                        "service_readback_logs",
+                                        "central_observability_export",
+                                    }
+                                    if origin not in snapshot_origins or (u_set and len(u_set) == 1 and not (case_u in u_set)):
+                                        errors.append(
+                                            f"Line {line_no} ({case_id}) step {expected_step_no}: VERIFY_RECORD_ABSENT cites evidence '{evidence_id}' which cannot prove absence for '{case_u}'"
+                                        )
 
             if status == "COMPLETE":
                 if phase != "VERIFICATION":

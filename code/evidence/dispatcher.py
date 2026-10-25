@@ -613,9 +613,15 @@ class EvidenceDispatcher:
                 entries = data if isinstance(data, list) else (data.get("records") or [])
                 for rec in entries:
                     u = rec.get("subject_reference") or rec.get("user_id")
+                    rec_time = captured_at
+                    if rec.get("recorded_at"):
+                        try:
+                            rec_time = datetime.fromisoformat(rec["recorded_at"].replace("Z", "+00:00"))
+                        except Exception:
+                            pass
                     self._add_record(
                         EvidenceRecord(
-                            file_id, captured_at, "security_service", rec.get("resource_id"),
+                            file_id, rec_time, "security_service", rec.get("resource_id"),
                             "SECURITY_AUDIT_LOG", u, None, None, "PRESENT", False
                         )
                     )
@@ -631,9 +637,15 @@ class EvidenceDispatcher:
                     eh = sub.lower() if (len(sub) == 64 and re.fullmatch(r"[0-9a-fA-F]{64}", sub)) else None
                     st = "ABSENT" if res == "NOT_FOUND" else "PRESENT"
                     has_pii = (cat in ("ANALYTICS_PROFILE", "SUPPORT_MESSAGE") and bool(em or eh))
+                    rec_time = captured_at
+                    if rec.get("recorded_at"):
+                        try:
+                            rec_time = datetime.fromisoformat(rec["recorded_at"].replace("Z", "+00:00"))
+                        except Exception:
+                            pass
                     self._add_record(
                         EvidenceRecord(
-                            file_id, captured_at, sys_id, rid, cat, u, em, eh, st, has_pii
+                            file_id, rec_time, sys_id, rid, cat, u, em, eh, st, has_pii
                         )
                     )
         except Exception as e:

@@ -106,6 +106,85 @@ class TestRegressionCases(unittest.TestCase):
         pred_steps = [s.to_dict() for s in pred.steps]
         self.assertEqual(pred_steps, gt_steps)
 
+    def test_regression_case_01(self):
+        """Regression test for case_01: Point-in-time database snapshot evidence_54 proves account_001 absent."""
+        req = self.requests["case_01"]
+        pred = self.engine.evaluate_case(req)
+        self.assertEqual(pred.deletion_status, "COMPLETE")
+        self.assertEqual(len(pred.steps), 1)
+        step = pred.steps[0].to_dict()
+        self.assertEqual(step["resource_id"], "account_001")
+        self.assertEqual(step["system_id"], "account_service")
+        self.assertEqual(step["operation"], "VERIFY_RECORD_ABSENT")
+        self.assertEqual(step["state"], "ABSENT")
+        self.assertEqual(step["evidence_id"], "evidence_54")
+
+    def test_regression_case_02(self):
+        """Regression test for case_02: Point-in-time database snapshot evidence_54 proves account_002 absent."""
+        req = self.requests["case_02"]
+        pred = self.engine.evaluate_case(req)
+        self.assertEqual(pred.deletion_status, "COMPLETE")
+        self.assertEqual(len(pred.steps), 1)
+        step = pred.steps[0].to_dict()
+        self.assertEqual(step["resource_id"], "account_002")
+        self.assertEqual(step["system_id"], "account_service")
+        self.assertEqual(step["operation"], "VERIFY_RECORD_ABSENT")
+        self.assertEqual(step["state"], "ABSENT")
+        self.assertEqual(step["evidence_id"], "evidence_54")
+
+    def test_regression_case_04(self):
+        """Regression test for case_04: Account proved absent via evidence_54 and analytics anonymized via evidence_56."""
+        req = self.requests["case_04"]
+        pred = self.engine.evaluate_case(req)
+        self.assertEqual(pred.deletion_status, "COMPLETE")
+        self.assertGreaterEqual(len(pred.steps), 1)
+        step1 = pred.steps[0].to_dict()
+        self.assertEqual(step1["resource_id"], "account_004")
+        self.assertEqual(step1["system_id"], "account_service")
+        self.assertEqual(step1["operation"], "VERIFY_RECORD_ABSENT")
+        self.assertEqual(step1["state"], "ABSENT")
+        self.assertEqual(step1["evidence_id"], "evidence_54")
+
+    def test_regression_case_28(self):
+        """Regression test for case_28: Verified COMPLETE across all systems with evidence_92 without foreign account_7012."""
+        req = self.requests["case_28"]
+        pred = self.engine.evaluate_case(req)
+        self.assertEqual(pred.deletion_status, "COMPLETE")
+        step_res = [s.resource_id for s in pred.steps]
+        self.assertNotIn("account_7012", step_res)
+        self.assertIn("audit_record_9265", step_res)
+        self.assertIn("support_2351", step_res)
+        for s in pred.steps:
+            self.assertEqual(s.phase, "VERIFICATION")
+            self.assertEqual(s.evidence_id, "evidence_92")
+
+    def test_sample_pipeline_execution_and_contract_validation(self):
+        """Priority 2 & 3: Run full sample pipeline and verify output strictly passes contract validator."""
+        import tempfile
+        from code.output.validator import validate_output_csv
+        from code.main import run_pipeline
+
+        with tempfile.NamedTemporaryFile("w+", delete=False, suffix=".csv") as tf:
+            out_path = Path(tf.name)
+
+        try:
+            sample_in = self.dataset_dir / "sample_deletion_requests.csv"
+            run_pipeline(input_path=sample_in, output_path=out_path, dataset_dir=self.dataset_dir)
+            expected_cids = list(self.requests.keys())
+            is_valid, errors = validate_output_csv(out_path, expected_cids, self.dataset_dir)
+            self.assertTrue(is_valid, f"Pipeline output failed validation: {errors}")
+            self.assertEqual(len(errors), 0)
+        finally:
+            if out_path.exists():
+                out_path.unlink()
+
+    def test_all_sample_cases_match_expected_status(self):
+        """Priority 3: Require all 32 sample cases to match the official expected status."""
+        for cid, req in self.requests.items():
+            pred = self.engine.evaluate_case(req)
+            gt_status, _ = self.ground_truth[cid]
+            self.assertEqual(pred.deletion_status, gt_status, f"Status mismatch for {cid}: pred={pred.deletion_status}, gt={gt_status}")
+
     def test_custom_case_01_historical_identity_drift(self):
         """Custom Case 1: Historical email drift with stale read replica."""
         custom_req = DeletionRequest(

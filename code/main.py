@@ -131,7 +131,7 @@ def run_pipeline(
     logger.info("Initializing Identity Resolver, Policy Engine, and Decision Engine...")
     resolver = IdentityResolver(users, audits)
     policy = PolicyEngine(rules)
-    engine = DecisionEngine(resolver, policy, dispatcher, activities)
+    engine = DecisionEngine(resolver, policy, dispatcher, activities, manifest_rows=manifest_rows)
 
     # 4. Evaluation Loop
     logger.info("Auditing %d cases against point-in-time evidence...", len(requests))

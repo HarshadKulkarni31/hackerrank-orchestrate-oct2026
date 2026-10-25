@@ -110,7 +110,7 @@ class TestOutputValidator(unittest.TestCase):
 
         is_valid, errors = validate_output_csv(tf_path, ["case_01"], Path("dataset"))
         self.assertFalse(is_valid)
-        self.assertTrue(any("does not contain claimed resource 'account_001' or subject 'user_01'" in err for err in errors))
+        self.assertTrue(any("cannot prove absence for 'user_01'" in err or "not relevant to system" in err for err in errors))
 
 
 if __name__ == "__main__":
